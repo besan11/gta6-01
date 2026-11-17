@@ -1,7 +1,7 @@
 // minimap.js — The minimap: Porto Verde at a glance, top-right of the HUD.
 // Features: live minimap showing the sea, roads, buildings, parks, the player's
-// arrow, the mission objective marker (pulsing), police blips, pickups and the
-// chase target, plus a north marker. Drawn in logical 1280x720 screen space.
+// arrow, the mission objective marker (pulsing), police blips, thug blips, pickups
+// and the chase target, plus a north marker. Drawn in logical 1280x720 screen space.
 import { PALETTE, WORLD } from './config.js';
 import { currentStep } from './missions.js';
 
@@ -45,6 +45,13 @@ export function drawMinimap(ctx, G, x, y, w, h) {
   for (const cop of G.police) {
     ctx.beginPath();
     ctx.arc(x + cop.x * sx, y + cop.y * sy, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Thug blips (purple) — the fight you are walking into is on the map too.
+  ctx.fillStyle = '#c07fff';
+  for (const e of G.enemies) {
+    ctx.beginPath();
+    ctx.arc(x + e.x * sx, y + e.y * sy, 3.5, 0, Math.PI * 2);
     ctx.fill();
   }
   // Objective marker (pulsing yellow diamond).

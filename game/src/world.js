@@ -1,7 +1,8 @@
 // world.js — The city of Porto Verde: map generation, collision and lookups.
 // Features: a 3200x2400 coastal grid city (sea + beach on the west, six avenues and
 // six streets, named districts, parks, plazas, palm trees), building collision,
-// road/sidewalk tests used by traffic, pedestrians and the minimap. No drawing here.
+// road/sidewalk tests used by traffic, pedestrians and the minimap, and an
+// open-ground test so spawns never land on a roof. No drawing here.
 import { BEACH_X, PALETTE, ROADS_X, ROADS_Y, ROAD_WIDTH, SEA_X, WORLD } from './config.js';
 import { randInt, randPick } from './random.js';
 
@@ -52,30 +53,39 @@ export function districtAt(x, y) {
   return 'Porto Verde';
 }
 
-/** Circle-vs-rectangle push-out: returns corrected {x, y} for a circle of radius r. */
+/** Circle-vs-rectangle push-out: returns corrected {x, y} for a circle of radius r.
+    Runs several passes because pushing out of one building can land the point
+    inside its neighbour (blocks hold 2x2 roofs with narrow gaps); without the
+    extra passes a thug or a car could end a step standing on a roof. */
 export function collideBuildings(buildings, x, y, r) {
-  for (const b of buildings) {
-    const cx = Math.max(b.x, Math.min(x, b.x + b.w));
-    const cy = Math.max(b.y, Math.min(y, b.y + b.h));
-    const dx = x - cx;
-    const dy = y - cy;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < r * r && d2 > 0.0001) {
-      const d = Math.sqrt(d2);
-      x = cx + (dx / d) * r;
-      y = cy + (dy / d) * r;
-    } else if (d2 <= 0.0001) {
-      // Centre inside the rectangle: push out along the shortest side.
-      const left = x - b.x;
-      const right = b.x + b.w - x;
-      const top = y - b.y;
-      const bottom = b.y + b.h - y;
-      const m = Math.min(left, right, top, bottom);
-      if (m === left) x = b.x - r;
-      else if (m === right) x = b.x + b.w + r;
-      else if (m === top) y = b.y - r;
-      else y = b.y + b.h + r;
+  for (let pass = 0; pass < 6; pass += 1) {
+    let moved = false;
+    for (const b of buildings) {
+      const cx = Math.max(b.x, Math.min(x, b.x + b.w));
+      const cy = Math.max(b.y, Math.min(y, b.y + b.h));
+      const dx = x - cx;
+      const dy = y - cy;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < r * r && d2 > 0.0001) {
+        const d = Math.sqrt(d2);
+        x = cx + (dx / d) * r;
+        y = cy + (dy / d) * r;
+        moved = true;
+      } else if (d2 <= 0.0001) {
+        // Centre inside the rectangle: push out along the shortest side.
+        const left = x - b.x;
+        const right = b.x + b.w - x;
+        const top = y - b.y;
+        const bottom = b.y + b.h - y;
+        const m = Math.min(left, right, top, bottom);
+        if (m === left) x = b.x - r;
+        else if (m === right) x = b.x + b.w + r;
+        else if (m === top) y = b.y - r;
+        else y = b.y + b.h + r;
+        moved = true;
+      }
     }
+    if (!moved) break;
   }
   return { x, y };
 }
@@ -85,6 +95,26 @@ export function hitsBuilding(buildings, x, y, r) {
   for (const b of buildings) {
     if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) return true;
   }
+  return false;
+}
+
+/**
+ * True when a point is genuinely open ground for standing on: on a road, a
+ * sidewalk, a park, a plaza or the beach — and at least `margin` clear of every
+ * building footprint, so nobody ever spawns on a roof edge or in a doorway.
+ * A point inside a building block's grass is NOT open: thugs belong on streets.
+ */
+export function isOpenGround(city, x, y, margin) {
+  if (hitsBuilding(city.buildings, x, y, margin)) return false;
+  if (isOnRoad(x, y) || isOnSidewalk(x, y)) return true;
+  for (const p of city.parks) {
+    if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return true;
+  }
+  for (const p of city.plazas) {
+    if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return true;
+  }
+  // The beach (sand west of the city, east of the sea) is open ground too.
+  if (x >= SEA_X + 14 && x < BEACH_X) return true;
   return false;
 }
 

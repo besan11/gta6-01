@@ -8,9 +8,9 @@
 //
 // ?seed=N fixes the city and the traffic. ?shot=... stages that scene instead of
 // running the loop.
-import { CLOCK, STEP } from './config.js';
+import { CLOCK, PED_COUNT, STEP, TRAFFIC_COUNT } from './config.js';
 import { createRandom, clamp, dist } from './random.js';
-import { createCity, collideBuildings } from './world.js';
+import { createCity, collideBuildings, isOpenGround } from './world.js';
 import { createPlayer, updatePlayerOnFoot, nearestCar, hurtPlayer } from './player.js';
 import { CAR_MODELS, createCar, driveCar, enterCar, exitCar, damageCar, spawnParkedCars } from './cars.js';
 import { createTraffic, updateTraffic } from './traffic.js';
@@ -73,15 +73,27 @@ export function createGame(seedValue) {
     hasSaveFlag: hasSave(),
   };
   G.city = createCity(random);
-  // Never spawn the player inside a building: nudge him out onto the street.
+  // Never spawn the player inside a building: nudge him out, and if the nudge
+  // leaves him in the middle of a block, put him on the sidewalk by the cafe.
+  // (The old fixed spawn sat inside a building on some seeds, Dario on a roof.)
   const spawn = collideBuildings(G.city.buildings, G.player.x, G.player.y, 16);
   G.player.x = spawn.x;
   G.player.y = spawn.y;
-  G.traffic = createTraffic(G, 16);
-  G.peds = createPedestrians(G, 26);
+  if (!isOpenGround(G.city, G.player.x, G.player.y, 14)) {
+    G.player.x = 560;
+    G.player.y = 470;
+  }
+  G.traffic = createTraffic(G, TRAFFIC_COUNT);
+  G.peds = createPedestrians(G, PED_COUNT);
   spawnParkedCars(G, 14);
-  // The player's own starter car waits by the Marina Cafe.
-  const starter = createCar(700, 540, Math.PI / 2, CAR_MODELS[0], 'none');
+  // The player's own starter car waits by the Marina Cafe — on the road beside
+  // it, never on a roof: the old fixed spot (700,540) sat inside a building.
+  const starterSpots = [[534, 540], [500, 560], [560, 540], [534, 420], [466, 540]];
+  let starterSpot = starterSpots[0];
+  for (const [sx, sy] of starterSpots) {
+    if (isOpenGround(G.city, sx, sy, 30)) { starterSpot = [sx, sy]; break; }
+  }
+  const starter = createCar(starterSpot[0], starterSpot[1], Math.PI / 2, CAR_MODELS[0], 'none');
   G.cars.push(starter);
   G.saveGame = () => saveGame(G);
   prepareStep(G);
@@ -264,6 +276,12 @@ function runGame() {
   function endGame() {
     screen = SCREEN_OVER;
     G.audio.setSiren(false);
+    // A dying Dario should not have the day banner and the "Press E" hint
+    // ghosting through the WASTED / BUSTED panel behind him.
+    G.dayBannerT = 0;
+    G.nearCar = null;
+    if (G.busted) G.audio.busted();
+    else G.audio.wasted();
     announce(G.busted ? 'Busted by the police.' : 'Wasted.');
   }
 

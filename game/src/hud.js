@@ -49,7 +49,9 @@ export function drawHud(ctx, G) {
   ctx.fillRect(1280 - 234, 176, 220, 26);
   ctx.fillStyle = 'rgba(255,255,255,0.15)';
   ctx.fillRect(1280 - 226, 185, 150, 9);
-  ctx.fillStyle = PALETTE.hp;
+  // Low health flashes so a glance is enough to know Dario is in trouble.
+  const lowHp = p.hp > 0 && p.hp < 30 && Math.floor(G.time * 4) % 2 === 0;
+  ctx.fillStyle = lowHp ? '#ffffff' : PALETTE.hp;
   ctx.fillRect(1280 - 226, 185, 150 * (p.hp / 100), 9);
   ctx.font = 'bold 13px ' + FONT;
   ctx.fillStyle = PALETTE.text;

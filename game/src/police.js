@@ -19,9 +19,14 @@ export function copsWanted(stars) {
 function spawnCopCar(G) {
   const p = G.player;
   const angle = G.random() * Math.PI * 2;
-  const x = clamp(p.x + Math.cos(angle) * POLICE.spawnDistance, 400, 3100);
-  const y = clamp(p.y + Math.sin(angle) * POLICE.spawnDistance, 80, 2320);
-  const car = createCar(x, y, angle, COP_MODEL, 'police');
+  // Land on a road near the player, never inside a building: a cop that spawns
+  // on a roof would slide off it and look broken for its first seconds.
+  const raw = {
+    x: clamp(p.x + Math.cos(angle) * POLICE.spawnDistance, 400, 3100),
+    y: clamp(p.y + Math.sin(angle) * POLICE.spawnDistance, 80, 2320),
+  };
+  const spot = collideBuildings(G.city.buildings, raw.x, raw.y, 26);
+  const car = createCar(spot.x, spot.y, angle, COP_MODEL, 'police');
   car.siren = true;
   G.police.push(car);
   G.cars.push(car);
@@ -66,12 +71,18 @@ export function updatePolice(G, dt) {
           G.audio.crash();
         }
       } else if (p.hp > 0) {
+        // Cornered on foot: the cop STOPS on the player and holds him there.
+        // A cop that just drives through at 560 never holds the 1.6 s of
+        // contact a bust needs, so BUSTED could never happen at all.
+        cop.speed = 0;
         G.bustTimer = (G.bustTimer || 0) + dt;
-        if (G.bustTimer > 1.6) {
+        if (G.bustTimer > POLICE.bustTime) {
           G.busted = true;
           G.audio.busted();
         }
-        hurtPlayer(G, 6 * dt);
+        // A cornered player can be beaten to zero here: the hurt must count as
+        // WASTED, or the player would sit at 0 HP, neither busted nor wasted.
+        if (hurtPlayer(G, 6 * dt)) G.wasted = true;
       }
     } else {
       G.bustTimer = Math.max(0, (G.bustTimer || 0) - dt * 2);

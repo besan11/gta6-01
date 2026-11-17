@@ -1,9 +1,10 @@
 // render.js — Drawing Porto Verde: the city, its people, its cars, its screens.
 // Features: camera that follows Dario (on foot or in a car), sun-soaked top-down
 // art (sea, beach, palms, parks, roads with lane dashes, roofed buildings), cars
-// with headlights and police light bars, pedestrians, thugs, bullets, crash and
-// explosion effects, mission markers, and the title / pause / wasted / busted /
-// victory screens. The HUD itself lives in hud.js; this file paints the world.
+// with headlights and police light bars, visible traffic, pedestrians, thugs,
+// bullets, crash and explosion effects, mission markers, and the title / pause /
+// wasted / busted / victory screens. Landmark labels sit above the palms and
+// never under a HUD panel. The HUD itself lives in hud.js; this file paints the world.
 import { FONT, PALETTE, VIEW, WORLD } from './config.js';
 import { drawHud } from './hud.js';
 import { currentMission, currentStep } from './missions.js';
@@ -115,9 +116,28 @@ export function createRenderer(canvas) {
         ctx.strokeRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
       }
     }
-    // Landmark labels.
+  }
+
+  // Landmark names, drawn AFTER the palms so a palm canopy never hides them,
+  // and skipped when the label would land underneath a HUD panel (the minimap
+  // used to swallow "Verde Garage" whole on the cover frame).
+  function drawLandmarkLabels(G, cam) {
+    const hidden = [
+      { x: 14, y: 12, w: 300, h: 96 }, // money / day / stars
+      { x: 14, y: 120, w: 300, h: 86 }, // mission panel
+      { x: 1042, y: 12, w: 228, h: 190 }, // minimap + health bar
+      { x: 1046, y: 642, w: 220, h: 64 }, // driving readout
+      { x: 14, y: 656, w: 330, h: 50 }, // controls hint
+    ];
     ctx.textAlign = 'center';
     for (const lm of G.city.landmarks) {
+      const sx = lm.x - cam.x;
+      const sy = lm.y - 10 - cam.y;
+      let covered = false;
+      for (const r of hidden) {
+        if (sx > r.x - 70 && sx < r.x + r.w + 70 && sy > r.y - 8 && sy < r.y + r.h + 8) { covered = true; break; }
+      }
+      if (covered) continue;
       ctx.font = 'bold 13px ' + FONT;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillText(lm.name, lm.x + 1, lm.y - 9);
@@ -232,6 +252,11 @@ export function createRenderer(canvas) {
     // Traffic and parked cars (player car drawn last, on top).
     for (const car of G.cars) {
       if (car.driver === 'player') continue;
+      drawCarShape(car);
+    }
+    // Traffic cars live on G.traffic, not G.cars: draw them too, or the avenues
+    // look empty even while twenty cars are driving them. Wrecks draw as wrecks.
+    for (const car of G.traffic) {
       drawCarShape(car);
     }
     // Pedestrians.
@@ -394,6 +419,7 @@ export function createRenderer(canvas) {
     drawGround(G, cam);
     drawBuildings(G);
     drawPalms(G);
+    drawLandmarkLabels(G, cam);
     drawEntities(G);
     ctx.restore();
   }

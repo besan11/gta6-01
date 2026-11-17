@@ -2,11 +2,13 @@
 // Features: a chained mission story (Dario Cruz returns home, works for Mara Solis,
 // and earns his way out in three days), mission briefings with dialogue, six
 // objective types (go to, drive to, collect, fight, chase, escape/defend), cash
-// rewards, day progression, and a mission-complete fanfare. Original characters,
+// rewards, day progression, and a mission-complete fanfare. Thugs spawn on open
+// ground only (road, sidewalk, plaza, park, beach) — never on a roof or inside
+// a building. Original characters,
 // original places, original story — nothing from any commercial game.
 import { MISSION_REWARDS } from './config.js';
 import { dist } from './random.js';
-import { collideBuildings } from './world.js';
+import { collideBuildings, isOpenGround } from './world.js';
 
 // Landmark coordinates (same map as world.js LANDMARKS), snapped to roads, parks,
 // the beach and the runway — never inside a building block, so every objective
@@ -189,13 +191,38 @@ function spawnPickups(G, step) {
   G.missions.pickups = step.pts.map((p) => ({ x: p.x, y: p.y, taken: false }));
 }
 
-/** Spawn thugs near a point for a fight/defend step. */
+/**
+ * Spawn thugs near a point for a fight/defend step — on open ground only.
+ * Candidates are sampled on a ring around the objective and accepted only when
+ * they sit on a road, sidewalk, plaza, park or beach, well clear of every
+ * building footprint, so no thug ever spawns on a roof or in a doorway. When
+ * the ring around an objective has no open ground (a courtyard objective), the
+ * fallback walks outward from the objective along the sampled direction until
+ * open ground is found instead of settling for a pushed-out roof edge.
+ */
 function spawnThugs(G, x, y, count) {
   for (let i = 0; i < count; i += 1) {
-    const a = G.random() * Math.PI * 2;
-    const d = 120 + G.random() * 120;
-    // Never spawn inside a building: nudge the thug out onto the street.
-    const placed = collideBuildings(G.city.buildings, x + Math.cos(a) * d, y + Math.sin(a) * d, 14);
+    let placed = null;
+    for (let attempt = 0; attempt < 14 && !placed; attempt += 1) {
+      const a = G.random() * Math.PI * 2;
+      const d = 120 + G.random() * 120;
+      const cx = x + Math.cos(a) * d;
+      const cy = y + Math.sin(a) * d;
+      if (isOpenGround(G.city, cx, cy, 26)) placed = { x: cx, y: cy };
+    }
+    if (!placed) {
+      // No open ground on the ring: step outward from the objective until there is.
+      const a = G.random() * Math.PI * 2;
+      let px = x;
+      let py = y;
+      for (let step = 0; step < 12; step += 1) {
+        px = x + Math.cos(a) * (120 + step * 30);
+        py = y + Math.sin(a) * (120 + step * 30);
+        if (isOpenGround(G.city, px, py, 26)) break;
+      }
+      const safe = collideBuildings(G.city.buildings, px, py, 26);
+      placed = { x: safe.x, y: safe.y };
+    }
     G.enemies.push({
       x: placed.x, y: placed.y,
       hp: 60, angle: 0, speed: 150, shootT: 1 + G.random(),

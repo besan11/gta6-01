@@ -1,7 +1,9 @@
 // traffic.js — City traffic: cars that drive the avenues and streets.
 // Features: traffic cars that follow the road grid in lanes, turn at intersections,
 // brake when the car ahead is slow, wrap around the city edges, and honk when the
-// player blocks them. They make the streets feel alive behind every screenshot.
+// player blocks them. Wrecked cars are towed away and replaced so the streets
+// never fill with permanent wrecks. They make the streets feel alive behind
+// every screenshot.
 import { ROADS_X, ROADS_Y, ROAD_WIDTH } from './config.js';
 import { randInt, randPick } from './random.js';
 import { CAR_MODELS, createCar } from './cars.js';
@@ -57,6 +59,17 @@ export function updateTraffic(G, dt) {
       const side = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
       if (ahead > 0 && ahead < 110 && side < 30) { target = 0; break; }
     }
+    if (target !== 0) {
+      // Brake for fellow traffic too, or cars pile through each other at lights.
+      for (const other of G.traffic) {
+        if (other === car || other.wrecked) continue;
+        const dx = other.x - car.x;
+        const dy = other.y - car.y;
+        const ahead = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
+        const side = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
+        if (ahead > 0 && ahead < 110 && side < 30) { target = 0; break; }
+      }
+    }
     if (target === 0 && G.player.car) {
       const p = G.player.car;
       const dx = p.x - car.x;
@@ -75,6 +88,18 @@ export function updateTraffic(G, dt) {
     if (car.y > 2370) car.y = 30;
     // Keep traffic cars out of buildings (they stay on roads, but a turn can clip a corner).
     if (car.x < 340) car.x = 340;
+  }
+  // Wrecked traffic is towed away and replaced, or the streets slowly fill with
+  // permanent wrecks after every chase. The courier is mission-owned, not towed.
+  for (let i = G.traffic.length - 1; i >= 0; i -= 1) {
+    const car = G.traffic[i];
+    if (!car.wrecked || car.driver === 'chase') continue;
+    car.wreckT = (car.wreckT || 0) + dt;
+    if (car.wreckT > 15) {
+      G.traffic.splice(i, 1);
+      const fresh = createTraffic(G, 1);
+      G.traffic.push(fresh[0]);
+    }
   }
   void ROAD_WIDTH;
 }

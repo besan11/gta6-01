@@ -2,7 +2,9 @@
 // Features: each scene plays the REAL game forward from a fresh seeded world with
 // a simple autopilot (drive the road, keep the lane, brake for traffic), so every
 // frame is what a short game really looks like and the same seed always gives the
-// same frame. Sets window.__shotReady when the scene is painted twice.
+// same frame. Chase scenes stage a busy avenue (two waves of traffic, sixteen
+// pedestrians on the sidewalks) so the cover reads as a living city. Sets
+// window.__shotReady when the scene is painted twice.
 //   cover   — dense chase gameplay: wanted 3, police on the tail, mission 2 live
 //   title   — title screen over the living city
 //   chase   — wanted 4, police ramming the player's car at speed
@@ -106,15 +108,25 @@ function stageChaseScene(G, wantedStars, copCount, money, hour, minute) {
     G.police.push(cop);
     G.cars.push(cop);
   }
-  // Traffic ahead to dodge.
-  for (let i = 0; i < 5; i += 1) {
+  // Traffic ahead to dodge — a busy avenue, not an empty one.
+  for (let i = 0; i < 8; i += 1) {
     const t = G.traffic[i];
     if (t) { t.x = 1300 + (i % 2 === 0 ? 22 : -22); t.y = 1150 + i * 170; t.angle = Math.PI / 2; t.speed = 150; }
   }
+  // A second wave of traffic crossing the avenue, for depth in the frame.
+  for (let i = 8; i < 12; i += 1) {
+    const t = G.traffic[i];
+    if (t) { t.x = 700 + (i - 8) * 190; t.y = 1500 + ((i % 2 === 0) ? 22 : -22); t.angle = (i % 2 === 0) ? 0 : Math.PI; t.speed = 140; }
+  }
   // Pedestrians on the sidewalks nearby.
-  for (let i = 0; i < 6; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     const ped = G.peds[i];
     if (ped) { ped.x = 1300 + (i % 2 === 0 ? -80 : 80); ped.y = 1000 + i * 90; }
+  }
+  // A few more pedestrians crossing the plaza side, so the sidewalks read busy.
+  for (let i = 10; i < 16; i += 1) {
+    const ped = G.peds[i];
+    if (ped) { ped.x = 1560 + (i - 10) * 40; ped.y = 1180 + ((i % 2 === 0) ? 0 : 60); }
   }
 }
 
@@ -124,7 +136,8 @@ function stageChaseScene(G, wantedStars, copCount, money, hour, minute) {
  */
 export function stageShot(name, G) {
   if (name === 'title') {
-    G.player.x = 660;
+    // On the sidewalk by the Marina Cafe — open ground, never a roof.
+    G.player.x = 560;
     G.player.y = 470;
     G.stepWorld({ x: 0, y: 0 }, STEP, true);
     for (let i = 0; i < 5 * 60; i += 1) G.stepWorld({ x: 0, y: 0 }, STEP, true);

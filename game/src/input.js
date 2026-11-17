@@ -58,6 +58,10 @@ export function createInput(canvas) {
   window.addEventListener('blur', () => {
     keys.clear();
     mouseDown = false;
+    // A stale Enter queued before the tab lost focus must not fire a menu
+    // confirm the moment the player comes back.
+    actions = 0;
+    mouseClicked = false;
   });
   canvas.addEventListener('pointermove', (event) => {
     const rect = canvas.getBoundingClientRect();

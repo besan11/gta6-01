@@ -16,11 +16,11 @@ three years away, broke and out of options. **Mara Solis** has work for him —
 **12 story missions across 3 days** — and the city is watching.
 
 - **Explore on foot and by car** — walk the sidewalks, steal any parked car (E) and drive it
-- **Living streets** — traffic that follows the roads, pedestrians who stroll, chat and flee
-- **Wanted level** — 0–5 stars with a HEAT meter; the Porto Verde police chase, ram and bust you
-- **Missions + story** — go-to, drive, collect, fight, chase, escape and defend objectives, with dialogue briefings
+- **Living streets** — traffic that follows the roads (20 cars), pedestrians who stroll, chat and flee (32), parked cars that never stack
+- **Wanted level** — 0–5 stars with a HEAT meter; the Porto Verde police chase, ram, and corner you on foot to bust you
+- **Missions + story** — go-to, drive, collect, fight, chase, escape and defend objectives, with dialogue briefings; thugs spawn on open streets, never on a roof
 - **Combat** — punch (F) and mouse-aimed pistol (click), thugs who chase and shoot back
-- **HUD + minimap** — money, health, wanted stars, day/time clock, district, mission panel, car speed/health
+- **HUD + minimap** — money, health, wanted stars, day/time clock, district, mission panel, car speed/health, police + thug blips on the minimap
 - **Save game** — autosaves after every mission, manual save (Q), Continue from the title screen
 - **Polish** — start / pause / wasted / busted / victory screens, camera that follows you, crash and explosion effects, synthesised WebAudio sound (engine, sirens, gunshots, music) — no audio files, no network requests
 
@@ -53,6 +53,18 @@ No build step, no dependencies, no network requests — just static files under 
 The four screenshots in `screenshots/` are real renders of the game in a browser
 (`?shot=cover|title|chase|mission&seed=7`): the cover is the densest chase frame,
 then the title screen, a police chase, and a mission briefing on foot.
+
+## Play-test
+
+`playtest.mjs` drives the game in headless Chromium (Playwright): it retakes the
+four screenshots and plays the live game — start, walk, steal and drive a car,
+shoot, punch, complete a mission, police response, pause, save/continue — plus
+both death paths (WASTED by thugs, BUSTED by the police) and the restart after
+each. It passes 20/20 with zero console errors:
+
+```sh
+node playtest.mjs
+```
 
 ## Entry
 

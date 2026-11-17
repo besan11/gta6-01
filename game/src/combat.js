@@ -121,7 +121,8 @@ export function updateCombat(G, dt) {
     if (d > 46) {
       const nx = e.x + Math.cos(e.angle) * e.speed * dt;
       const ny = e.y + Math.sin(e.angle) * e.speed * dt;
-      const fixed = collideBuildings(G.city.buildings, nx, ny, 12);
+      // 16, not 12: a thug hugging a wall reads as standing on the roof edge.
+      const fixed = collideBuildings(G.city.buildings, nx, ny, 16);
       e.x = fixed.x;
       e.y = fixed.y;
     } else if (e.meleeT <= 0) {

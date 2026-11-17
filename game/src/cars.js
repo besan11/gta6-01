@@ -51,6 +51,12 @@ export function spawnParkedCars(G, count) {
     }
     if (hitsBuilding(G.city.buildings, x, y, 40)) continue;
     if (isOnRoad(x, y) === false) continue;
+    // Parked cars used to stack on top of each other on busy roads; keep a gap.
+    let crowded = false;
+    for (const other of G.cars) {
+      if (Math.abs(other.x - x) < 78 && Math.abs(other.y - y) < 44) { crowded = true; break; }
+    }
+    if (crowded) continue;
     G.cars.push(createCar(x, y, angle, randPick(random, CAR_MODELS), 'none'));
     placed += 1;
   }

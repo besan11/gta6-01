@@ -4,7 +4,7 @@
 // Hitting one is a crime (wanted +1). They give the city its street life.
 import { ROADS_X, ROADS_Y, ROAD_WIDTH } from './config.js';
 import { clamp, dist, randInt, randPick } from './random.js';
-import { isOnRoad } from './world.js';
+import { collideBuildings, isOnRoad } from './world.js';
 
 const PED_COLORS = ['#e8e4da', '#d06fa0', '#3fbf9f', '#e8b73a', '#7d8ba0', '#c96f4a', '#5f8f7b', '#a06a8f'];
 const PED_NAMES = ['Ana', 'Bruno', 'Celia', 'Diego', 'Elena', 'Felix', 'Gabi', 'Hugo', 'Ines', 'Jorge', 'Kira', 'Leo', 'Mia', 'Nico', 'Olga', 'Pablo'];
@@ -47,8 +47,11 @@ export function updatePedestrians(G, dt) {
       const dx = ped.x - p.x;
       const dy = ped.y - p.y;
       const d = Math.hypot(dx, dy) || 1;
-      ped.x += (dx / d) * 190 * dt;
-      ped.y += (dy / d) * 190 * dt;
+      // Fleeing straight away from the player used to run peds through walls
+      // and into the sea; slide along buildings instead.
+      const fixed = collideBuildings(G.city.buildings, ped.x + (dx / d) * 190 * dt, ped.y + (dy / d) * 190 * dt, 12);
+      ped.x = fixed.x;
+      ped.y = fixed.y;
       ped.angle = Math.atan2(dy, dx);
     } else {
       if (ped.wait > 0) {

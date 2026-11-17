@@ -50,15 +50,17 @@ export function hasSave() {
 
 /** Apply a loaded save to a fresh game state. */
 export function applySave(G, data) {
-  G.missions.index = Math.min(data.mission || 0, 11);
-  G.missions.completedCount = data.completed || 0;
-  G.player.money = data.money || 0;
-  G.player.hp = data.hp || 100;
-  G.clock.day = data.day || 1;
-  G.clock.hour = data.hour || 8;
-  G.clock.minute = data.minute || 0;
-  G.player.x = data.x || 660;
-  G.player.y = data.y || 470;
+  // A hand-edited or truncated save must never strand Dario outside the map or
+  // on a mission that does not exist (index -1 used to crash the mission HUD).
+  G.missions.index = Math.max(0, Math.min(data.mission || 0, 11));
+  G.missions.completedCount = Math.max(0, data.completed || 0);
+  G.player.money = Math.max(0, data.money || 0);
+  G.player.hp = Math.max(1, Math.min(data.hp || 100, 100));
+  G.clock.day = Math.max(1, Math.min(data.day || 1, 3));
+  G.clock.hour = Math.max(0, Math.min(data.hour || 8, 23));
+  G.clock.minute = Math.max(0, Math.min(data.minute || 0, 59));
+  G.player.x = Math.max(274, Math.min(data.x || 660, 3184));
+  G.player.y = Math.max(16, Math.min(data.y || 470, 2384));
   G.player.onFoot = true;
   G.player.car = null;
 }

@@ -13,6 +13,7 @@ export function createRandom(seed) {
 
 /** Integer in [min, max] from a seeded random function. */
 export function randInt(random, min, max) {
+  if (max < min) { const t = min; min = max; max = t; }
   return min + Math.floor(random() * (max - min + 1));
 }
 

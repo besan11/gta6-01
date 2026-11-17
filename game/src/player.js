@@ -27,7 +27,8 @@ export function updatePlayerOnFoot(G, dt, move, running, mouseWorld) {
     const nx = p.x + (move.x / len) * speed * dt;
     const ny = p.y + (move.y / len) * speed * dt;
     const fixed = collideBuildings(G.city.buildings, nx, ny, PLAYER.radius);
-    p.x = clamp(fixed.x, 16, 3184);
+    // The sea starts west of x=260: Dario can stroll the sand, not swim in it.
+    p.x = clamp(fixed.x, 274, 3184);
     p.y = clamp(fixed.y, 16, 2384);
     p.faceX = move.x / len;
     p.faceY = move.y / len;

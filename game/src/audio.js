@@ -149,5 +149,6 @@ export function createAudio() {
     wantedUp() { tone(392, 0.16, 'square', 0.09); window.setTimeout(() => tone(311, 0.22, 'square', 0.09), 140); },
     crash() { noise(0.25, 0.3, 700); tone(90, 0.25, 'sine', 0.2, 40); },
     busted() { tone(220, 0.4, 'sawtooth', 0.12, 110); },
+    wasted() { tone(330, 0.3, 'sawtooth', 0.12, 165); window.setTimeout(() => tone(165, 0.55, 'sawtooth', 0.12, 82), 220); },
   };
 }

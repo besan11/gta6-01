@@ -15,6 +15,9 @@ export const ROADS_Y = [300, 700, 1100, 1500, 1900, 2200];
 export const BEACH_X = 340; // sand west of this; sea west of x=260
 export const SEA_X = 260;
 
+export const TRAFFIC_COUNT = 20; // traffic cars cruising the avenues
+export const PED_COUNT = 32; // pedestrians on the sidewalks
+
 export const PLAYER = {
   radius: 14,
   walkSpeed: 230,
@@ -45,6 +48,7 @@ export const POLICE = {
   accel: 520,
   ramDamage: 12,
   bustRadius: 60,
+  bustTime: 1.6, // seconds a cop must hold the player on foot before the bust lands
   spawnDistance: 700,
 };
 

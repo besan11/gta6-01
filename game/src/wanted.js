@@ -29,6 +29,8 @@ export function addWanted(G, n, reason) {
 export function clearWanted(G) {
   G.wanted.stars = 0;
   G.wanted.heat = 0;
+  G.wanted.decayTimer = 0;
+  G.wanted.lastCrimeReason = '';
   G.audio.setSiren(false);
 }
 
