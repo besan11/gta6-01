@@ -1,64 +1,73 @@
-// save.js — Saving Porto Verde: continue where Dario left off.
-// Features: save the mission, money, health, day/time and position to localStorage
-// (autosave after every mission, manual save with Q), load it back on Continue,
-// and detect whether a save exists for the title screen. Browser-only storage.
-import { SAVE_KEY } from './config.js';
+// save.js — Save and Continue, localStorage only. The v1 schema is kept
+// exactly ({version:1, mission, completed, money, hp, day, hour, minute,
+// x, y, savedAt}) so an old save still loads; REP and the weapon slots ride
+// along as extra fields with safe defaults when they are missing.
+import { SAVE_KEY, REP_RANKS } from './config.js';
+import { clamp } from './random.js';
+import { repRankFor } from './rep.js';
 
-/** Write the current progress to localStorage. */
 export function saveGame(G) {
+  const data = {
+    version: 1,
+    mission: G.missions.index,
+    completed: G.missions.completedCount,
+    money: Math.floor(G.player.money),
+    hp: Math.ceil(G.player.hp),
+    day: G.clock.day,
+    hour: G.clock.hour,
+    minute: G.clock.minute,
+    x: Math.round(G.player.x),
+    y: Math.round(G.player.y),
+    rep: G.rep.total,
+    weapons: G.weapons.slots.map((s) => ({ name: s.name, ammo: s.ammo === Infinity ? -1 : s.ammo, unlocked: s.unlocked })),
+    savedAt: 0,
+  };
   try {
-    const p = G.player;
-    const data = {
-      version: 1,
-      mission: G.missions.index,
-      completed: G.missions.completedCount,
-      money: p.money,
-      hp: p.hp,
-      day: G.clock.day,
-      hour: G.clock.hour,
-      minute: G.clock.minute,
-      x: p.x,
-      y: p.y,
-      savedAt: Date.now(),
-    };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    G.toast = 'Progress saved — see you soon, Dario.';
-    G.toastT = 2.5;
-    return true;
-  } catch {
-    return false;
-  }
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) { /* storage unavailable */ }
+  return data;
 }
 
-/** Read the save, or null when there is none / it is unreadable. */
 export function loadSave() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data || data.version !== 1) return null;
     return data;
-  } catch {
+  } catch (e) {
     return null;
   }
 }
 
-/** True when a save exists to continue from. */
 export function hasSave() {
   return loadSave() !== null;
 }
 
-/** Apply a loaded save to a fresh game state. */
 export function applySave(G, data) {
-  G.missions.index = Math.min(data.mission || 0, 11);
-  G.missions.completedCount = data.completed || 0;
+  if (!data) return;
+  G.missions.index = clamp(data.mission || 0, 0, 11);
+  G.missions.completedCount = clamp(data.completed || 0, 0, 12);
+  G.missions.step = 0;
   G.player.money = data.money || 0;
-  G.player.hp = data.hp || 100;
-  G.clock.day = data.day || 1;
-  G.clock.hour = data.hour || 8;
-  G.clock.minute = data.minute || 0;
-  G.player.x = data.x || 660;
-  G.player.y = data.y || 470;
-  G.player.onFoot = true;
-  G.player.car = null;
+  G.player.hp = clamp(data.hp || 100, 1, 100);
+  G.clock.day = clamp(data.day || 1, 1, 3);
+  G.clock.hour = clamp(data.hour || 8, 0, 22);
+  G.clock.minute = clamp(data.minute || 0, 0, 59);
+  G.player.x = clamp(data.x || 534, 274, 3184);
+  G.player.y = clamp(data.y || 540, 16, 2384);
+  if (typeof data.rep === 'number') {
+    G.rep.total = data.rep;
+    G.rep.rank = repRankFor(data.rep);
+    G.rep.rankName = REP_RANKS[G.rep.rank].name;
+  }
+  if (Array.isArray(data.weapons)) {
+    for (const saved of data.weapons) {
+      const slot = G.weapons.slots.find((s) => s.name === saved.name);
+      if (slot) {
+        slot.ammo = saved.ammo === -1 ? Infinity : saved.ammo;
+        slot.unlocked = !!saved.unlocked;
+      }
+    }
+  }
 }
