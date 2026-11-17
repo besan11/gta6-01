@@ -1,71 +1,53 @@
-// player.js — Dario Cruz on foot: walking, running, punching and aiming.
-// Features: on-foot movement with building collision, run with Shift, punch (F)
-// with cooldown, mouse-aimed shooting, entering/exiting cars (E), health and
-// invulnerability after a hit. The player object lives on the shared game state.
-import { PLAYER } from './config.js';
+// The player on foot: Dario Cruz, walking, running, taking hits, finding the nearest car.
+import { PLAYER, WORLD_W, WORLD_H } from './config.js';
 import { clamp, dist } from './random.js';
 import { collideBuildings } from './world.js';
 
-/** Create the player at the Marina Cafe, on foot, with starting cash. */
 export function createPlayer() {
   return {
-    x: 660, y: 470, angle: 0, hp: PLAYER.hp, money: 120,
-    onFoot: true, car: null, speed: 0,
-    punchCooldown: 0, shootCooldown: 0, invuln: 0,
-    moving: false, faceX: 1, faceY: 0,
+    x: 534, y: 540, angle: 0, hp: PLAYER.hp, invuln: 0,
+    money: 0, car: null, onFoot: true, vx: 0, vy: 0, punchCd: 0, shootCd: 0,
   };
 }
 
-/** Move the player on foot for one step; returns nothing, mutates G.player. */
 export function updatePlayerOnFoot(G, dt, move, running, mouseWorld) {
   const p = G.player;
   if (!p.onFoot) return;
-  const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
-  const len = Math.hypot(move.x, move.y);
-  p.moving = len > 0;
-  if (len > 0) {
-    const nx = p.x + (move.x / len) * speed * dt;
-    const ny = p.y + (move.y / len) * speed * dt;
-    const fixed = collideBuildings(G.city.buildings, nx, ny, PLAYER.radius);
-    p.x = clamp(fixed.x, 16, 3184);
-    p.y = clamp(fixed.y, 16, 2384);
-    p.faceX = move.x / len;
-    p.faceY = move.y / len;
-  }
-  // Face the mouse when shooting is possible; otherwise face the walk direction.
-  if (mouseWorld) {
-    const dx = mouseWorld.x - p.x;
-    const dy = mouseWorld.y - p.y;
-    if (Math.hypot(dx, dy) > 24) p.angle = Math.atan2(dy, dx);
-  } else if (len > 0) {
-    p.angle = Math.atan2(p.faceY, p.faceX);
-  }
-  if (p.punchCooldown > 0) p.punchCooldown -= dt;
-  if (p.shootCooldown > 0) p.shootCooldown -= dt;
-  if (p.invuln > 0) p.invuln -= dt;
+  const speed = running ? PLAYER.run : PLAYER.walk;
+  p.vx = move.x * speed;
+  p.vy = move.y * speed;
+  p.x = clamp(p.x + p.vx * dt, 24, WORLD_W - 24);
+  p.y = clamp(p.y + p.vy * dt, 24, WORLD_H - 24);
+  const fixed = collideBuildings(G.city.buildings, p.x, p.y, PLAYER.radius);
+  p.x = fixed.x;
+  p.y = fixed.y;
+  if (mouseWorld) p.angle = Math.atan2(mouseWorld.y - p.y, mouseWorld.x - p.x);
+  else if (move.x !== 0 || move.y !== 0) p.angle = Math.atan2(move.y, move.x);
+  p.invuln = Math.max(0, p.invuln - dt);
+  p.punchCd = Math.max(0, p.punchCd - dt);
+  p.shootCd = Math.max(0, p.shootCd - dt);
 }
 
-/** Hurt the player; returns true when the player is wasted (hp <= 0). */
 export function hurtPlayer(G, amount) {
   const p = G.player;
-  if (p.invuln > 0 || p.hp <= 0) return false;
+  if (p.invuln > 0 || p.hp <= 0) return;
   p.hp -= amount;
-  p.invuln = 0.7;
+  p.invuln = 0.6;
+  G.effects.push({ x: p.x, y: p.y, t: 0.3, kind: 'hit' });
   if (p.hp <= 0) {
     p.hp = 0;
-    return true;
+    G.wasted = true;
+    if (G.audio) G.audio.wasted();
   }
-  return false;
 }
 
-/** The nearest drivable car within range of the player, or null. */
 export function nearestCar(G, range) {
-  const p = G.player;
   let best = null;
   let bestD = range;
-  for (const car of G.cars) {
+  const all = G.cars.concat(G.traffic);
+  for (const car of all) {
     if (car.wrecked) continue;
-    const d = dist(p.x, p.y, car.x, car.y);
+    const d = dist(G.player.x, G.player.y, car.x, car.y);
     if (d < bestD) { bestD = d; best = car; }
   }
   return best;

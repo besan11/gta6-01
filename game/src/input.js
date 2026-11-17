@@ -1,26 +1,16 @@
-// input.js — Keyboard and mouse input for Porto Verde.
-// Features: WASD/arrows to move and drive, E to enter/exit a car, F to punch,
-// mouse aim + click to shoot, Shift to run, Space as handbrake, P/Esc to pause,
-// M to mute, S to save, Enter to confirm menus. One-shot presses are queued as
-// bit flags and taken once by the loop, so a press between frames is never lost.
+// Keyboard + mouse input: one bitmask of actions per frame plus a live movement vector.
 export const ACTION_CONFIRM = 1;
 export const ACTION_PAUSE = 2;
 export const ACTION_ENTER_CAR = 4;
 export const ACTION_PUNCH = 8;
 export const ACTION_SAVE = 16;
 export const ACTION_MUTE = 32;
-
-const UP = new Set(['ArrowUp', 'KeyW']);
-const DOWN = new Set(['ArrowDown', 'KeyS']);
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Enter', 'Space']);
-const PAUSE = new Set(['KeyP', 'Escape']);
-const ENTER_CAR = new Set(['KeyE']);
-const PUNCH = new Set(['KeyF']);
-const SAVE = new Set(['KeyQ']);
-const MUTE = new Set(['KeyM']);
-const RUN = new Set(['ShiftLeft', 'ShiftRight']);
+export const ACTION_RADIO = 64;
+export const ACTION_WEAPON1 = 128;
+export const ACTION_WEAPON2 = 256;
+export const ACTION_WEAPON3 = 512;
+export const ACTION_WEAPON4 = 1024;
+export const ACTION_CONTINUE = 2048;
 
 export function createInput(canvas) {
   const keys = new Set();
@@ -28,86 +18,69 @@ export function createInput(canvas) {
   let mouseX = 0;
   let mouseY = 0;
   let mouseDown = false;
-  let mouseClicked = false;
+  let clicked = false;
 
-  window.addEventListener('keydown', (event) => {
-    if (UP.has(event.code) || DOWN.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) {
-      keys.add(event.code);
-      event.preventDefault();
-    } else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-      event.preventDefault();
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-      event.preventDefault();
-    } else if (ENTER_CAR.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_ENTER_CAR;
-    } else if (PUNCH.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PUNCH;
-    } else if (SAVE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_SAVE;
-    } else if (MUTE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_MUTE;
-    } else if (RUN.has(event.code)) {
-      keys.add(event.code);
-    }
-  });
-  window.addEventListener('keyup', (event) => {
-    keys.delete(event.code);
-  });
-  window.addEventListener('blur', () => {
-    keys.clear();
-    mouseDown = false;
-  });
-  canvas.addEventListener('pointermove', (event) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = event.clientX - rect.left;
-    mouseY = event.clientY - rect.top;
-  });
-  canvas.addEventListener('pointerdown', (event) => {
-    const rect = canvas.getBoundingClientRect();
-    mouseX = event.clientX - rect.left;
-    mouseY = event.clientY - rect.top;
-    mouseDown = true;
-    mouseClicked = true;
-    actions |= ACTION_CONFIRM;
-  });
-  canvas.addEventListener('pointerup', () => {
-    mouseDown = false;
-  });
-
-  function axis(neg, pos) {
-    let v = 0;
-    for (const c of neg) if (keys.has(c)) v -= 1;
-    for (const c of pos) if (keys.has(c)) v += 1;
-    return v;
+  function press(code) {
+    if (code === 'Enter' || code === 'Space') actions |= ACTION_CONFIRM;
+    else if (code === 'KeyP' || code === 'Escape') actions |= ACTION_PAUSE;
+    else if (code === 'KeyE') actions |= ACTION_ENTER_CAR;
+    else if (code === 'KeyF') actions |= ACTION_PUNCH;
+    else if (code === 'KeyQ') actions |= ACTION_SAVE;
+    else if (code === 'KeyM') actions |= ACTION_MUTE;
+    else if (code === 'KeyR') actions |= ACTION_RADIO;
+    else if (code === 'Digit1') actions |= ACTION_WEAPON1;
+    else if (code === 'Digit2') actions |= ACTION_WEAPON2;
+    else if (code === 'Digit3') actions |= ACTION_WEAPON3;
+    else if (code === 'Digit4') actions |= ACTION_WEAPON4;
+    else if (code === 'KeyC') actions |= ACTION_CONTINUE;
   }
 
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    keys.add(e.code);
+    press(e.code);
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => keys.delete(e.code));
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+  });
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    clicked = true;
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+    e.preventDefault();
+  });
+  window.addEventListener('mouseup', () => { mouseDown = false; });
+  window.addEventListener('blur', () => keys.clear());
+
   return {
-    /** Move axes: x = -1..1 (left/right), y = -1..1 (up/down). */
-    move() {
-      return { x: axis(LEFT, RIGHT), y: axis(UP, DOWN) };
-    },
-    running() {
-      for (const c of RUN) if (keys.has(c)) return true;
-      return false;
-    },
-    handbrake() {
-      return keys.has('Space');
-    },
-    mouse() {
-      return { x: mouseX, y: mouseY, down: mouseDown };
-    },
-    takeClick() {
-      const c = mouseClicked;
-      mouseClicked = false;
-      return c;
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
     takeActions() {
-      const taken = actions;
+      const a = actions;
       actions = 0;
-      return taken;
+      return a;
+    },
+    move() {
+      let x = 0;
+      let y = 0;
+      if (keys.has('KeyA') || keys.has('ArrowLeft')) x -= 1;
+      if (keys.has('KeyD') || keys.has('ArrowRight')) x += 1;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) y -= 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) y += 1;
+      if (x !== 0 && y !== 0) { x *= 0.7071; y *= 0.7071; }
+      return { x, y };
+    },
+    running() { return keys.has('ShiftLeft') || keys.has('ShiftRight'); },
+    has(code) { return keys.has(code); },
+    mouse() { return { x: mouseX, y: mouseY, down: mouseDown }; },
+    takeClick() {
+      const c = clicked;
+      clicked = false;
+      return c;
     },
   };
 }
