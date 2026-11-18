@@ -1,189 +1,132 @@
-// hud.js — The heads-up display: money, health, wanted stars, clock, missions.
-// Features: top-left money + day/time + district + wanted stars + HEAT bar,
-// mission panel (mission number, giver, objective, distance), dialog box with the
-// story briefing, toast messages, day banners, car speed + health while driving,
-// controls hint, and the minimap (see minimap.js). All in logical 1280x720 space.
-import { FONT, PALETTE } from './config.js';
-import { districtAt } from './world.js';
-import { currentMission, currentStep, objectiveText } from './missions.js';
-import { drawMinimap } from './minimap.js';
+// drawHud: every panel in its own rectangle, placed by hud-layout.js.
+// Top-left money + clock + district + health, mission panel + REP under it,
+// stars + PD response + big minimap top-right, timer top-centre, weapons
+// bottom-centre, speed + car + radio bottom-right, dialog above the weapons.
+import { PALETTE, MISSION_REWARDS } from './config.js';
+import { LAYOUT, minimapY, repY } from './hud-layout.js';
+import { drawPdPanel } from './police-response.js';
+import { drawMinimapPlus } from './minimap-plus.js';
+import { drawRepBar } from './rep.js';
+import { drawRadio } from './radio.js';
+import { drawWeapons } from './weapons.js';
+import { drawMissionTimer } from './mission-timer.js';
+import { drawDistrictBanner } from './districts.js';
+import { drawDialog } from './dialogue.js';
+import { formatMoney } from './money-scale.js';
+import { currentMission, currentStep, MISSIONS } from './missions.js';
 
 export function drawHud(ctx, G) {
   const p = G.player;
   ctx.textBaseline = 'alphabetic';
-  // --- Top-left: money, day/time, district, wanted stars, heat ---
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(14, 12, 300, 96);
-  ctx.strokeStyle = 'rgba(255,207,63,0.5)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(14, 12, 300, 96);
+  // ---- Top-left: money, day + clock, district, health.
   ctx.textAlign = 'left';
-  ctx.font = 'bold 26px ' + FONT;
+  ctx.font = 'bold 30px sans-serif';
   ctx.fillStyle = PALETTE.money;
-  ctx.fillText('$' + p.money.toLocaleString('en-US'), 26, 44);
-  ctx.font = '16px ' + FONT;
+  ctx.fillText(formatMoney(p.money), LAYOUT.money.x, LAYOUT.money.y + 26);
+  ctx.font = 'bold 15px sans-serif';
   ctx.fillStyle = PALETTE.text;
   const hh = String(G.clock.hour).padStart(2, '0');
   const mm = String(G.clock.minute).padStart(2, '0');
-  ctx.fillText('DAY ' + G.clock.day + '  ' + hh + ':' + mm + '  •  ' + districtAt(p.x, p.y), 26, 68);
-  // Wanted stars.
-  for (let i = 0; i < 5; i += 1) {
-    ctx.font = '22px ' + FONT;
-    ctx.fillStyle = i < G.wanted.stars ? PALETTE.star : 'rgba(255,255,255,0.22)';
-    ctx.fillText('★', 26 + i * 26, 98);
-  }
-  // Heat bar.
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fillRect(160, 84, 140, 8);
-  ctx.fillStyle = G.wanted.heat > 60 ? '#ff5a4e' : PALETTE.star;
-  ctx.fillRect(160, 84, 140 * (G.wanted.heat / 100), 8);
-  ctx.font = '11px ' + FONT;
-  ctx.fillStyle = PALETTE.muted;
-  ctx.fillText('HEAT ' + Math.round(G.wanted.heat), 160, 80);
-
-  // --- Minimap top-right ---
-  drawMinimap(ctx, G, 1280 - 234, 16, 220, 152);
-
-  // --- Health bar under the minimap ---
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(1280 - 234, 176, 220, 26);
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fillRect(1280 - 226, 185, 150, 9);
+  ctx.fillText(`DAY ${G.clock.day} · ${hh}:${mm}  ·  ${G.district.name}`, LAYOUT.money.x, LAYOUT.money.y + 48);
+  // Health bar, on its own row below the day line.
+  ctx.fillStyle = 'rgba(16,20,28,0.88)';
+  ctx.fillRect(16, 66, 150, 10);
   ctx.fillStyle = PALETTE.hp;
-  ctx.fillRect(1280 - 226, 185, 150 * (p.hp / 100), 9);
-  ctx.font = 'bold 13px ' + FONT;
+  ctx.fillRect(16, 66, 150 * Math.max(0, p.hp / 100), 10);
   ctx.fillStyle = PALETTE.text;
-  ctx.fillText('HP ' + Math.ceil(p.hp), 1280 - 66, 194);
-
-  // --- Mission panel (left, under the stats) ---
-  const m = currentMission(G.missions);
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(14, 120, 300, 86);
-  ctx.strokeStyle = 'rgba(55,224,160,0.6)';
-  ctx.strokeRect(14, 120, 300, 86);
+  ctx.font = 'bold 11px sans-serif';
+  ctx.fillText(`HP ${Math.round(p.hp)}`, 168, 75);
+  // ---- Mission panel.
+  const m = currentMission(G);
+  const panelY = 84;
+  let panelH = 96;
   if (m) {
-    ctx.font = 'bold 15px ' + FONT;
-    ctx.fillStyle = PALETTE.objective;
-    ctx.fillText('MISSION ' + (G.missions.index + 1) + '/12 — ' + m.title.toUpperCase(), 26, 144);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText(m.giver + '  •  Day ' + m.day, 26, 164);
-    ctx.font = '14px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    wrapText(ctx, objectiveText(G), 26, 186, 276, 16);
-    const step = currentStep(G.missions);
-    if (step) {
-      const px = p.car ? p.car.x : p.x;
-      const py = p.car ? p.car.y : p.y;
-      const d = Math.round(Math.hypot(step.x - px, step.y - py));
-      ctx.font = 'bold 12px ' + FONT;
-      ctx.fillStyle = PALETTE.marker;
-      ctx.textAlign = 'right';
-      ctx.fillText(d + 'm', 300, 144);
-      ctx.textAlign = 'left';
-    }
-  } else {
-    ctx.font = 'bold 15px ' + FONT;
-    ctx.fillStyle = PALETTE.objective;
-    ctx.fillText('ALL MISSIONS COMPLETE', 26, 150);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText('Porto Verde is yours, Dario.', 26, 174);
-  }
-
-  // --- Driving readout bottom-right ---
-  if (p.car) {
-    const car = p.car;
-    const mph = Math.round(Math.abs(car.speed) * 0.12);
+    const step = currentStep(G);
+    const next = MISSIONS[G.missions.index + 1];
     ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(1280 - 234, 720 - 78, 220, 64);
-    ctx.textAlign = 'left';
-    ctx.font = 'bold 26px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText(mph + ' MPH', 1280 - 222, 720 - 44);
-    ctx.font = '13px ' + FONT;
+    ctx.fillRect(LAYOUT.missionPanel.x, panelY, LAYOUT.missionPanel.w, panelH);
+    ctx.strokeStyle = PALETTE.panelEdge;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(LAYOUT.missionPanel.x + 0.5, panelY + 0.5, LAYOUT.missionPanel.w - 1, panelH - 1);
+    ctx.fillStyle = PALETTE.panelEdge;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(`MISSION ${G.missions.index + 1}/12 — ${m.title.toUpperCase()}`, LAYOUT.missionPanel.x + 10, panelY + 20);
+    ctx.fillStyle = PALETTE.objective;
+    ctx.font = 'bold 13px sans-serif';
+    const stage = step ? `Stage ${G.missions.step + 1}/${m.steps.length}  ·  ` : '';
+    ctx.fillText(`${stage}${step ? step.label : ''}`, LAYOUT.missionPanel.x + 10, panelY + 42);
     ctx.fillStyle = PALETTE.muted;
-    ctx.fillText(car.model.name, 1280 - 222, 720 - 24);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(1280 - 110, 720 - 56, 90, 9);
-    ctx.fillStyle = car.hp > 40 ? PALETTE.money : PALETTE.hp;
-    ctx.fillRect(1280 - 110, 720 - 56, 90 * (car.hp / 100), 9);
-    ctx.font = '11px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText('CAR ' + Math.ceil(car.hp) + '%', 1280 - 110, 720 - 34);
-  } else {
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(14, 720 - 64, 330, 50);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText('WASD move  •  Shift run  •  E enter car', 26, 720 - 42);
-    ctx.fillText('F punch  •  Click shoot  •  Q save  •  P pause', 26, 720 - 24);
+    ctx.font = '12px sans-serif';
+    if (next) ctx.fillText(`NEXT: ${next.title} — ${next.giver === 'MARA' ? 'Mara Solis' : next.giver === 'TITO' ? 'Tito Ramos' : 'Lena Voss'}`, LAYOUT.missionPanel.x + 10, panelY + 64);
+    const reward = MISSION_REWARDS[G.missions.index] || 0;
+    ctx.fillText(`Reward ${formatMoney(reward)}  ·  ${m.giver === 'MARA' ? 'Mara Solis' : m.giver === 'TITO' ? 'Tito Ramos' : 'Lena Voss'}`, LAYOUT.missionPanel.x + 10, panelY + 84);
   }
-
-  // --- Toast (centre-top) ---
+  // ---- REP bar under the mission panel.
+  drawRepBar(ctx, G, 16, repY(panelH), 372);
+  // ---- Top-right: wanted stars, PD panel, big minimap.
+  ctx.textAlign = 'right';
+  ctx.font = 'bold 26px sans-serif';
+  let stars = '';
+  for (let i = 0; i < 5; i++) stars += i < G.wanted.stars ? '★' : '☆';
+  ctx.fillStyle = G.wanted.stars > 0 ? PALETTE.star : 'rgba(244,241,232,0.35)';
+  ctx.fillText(stars, 1264, 36);
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = G.wanted.stars > 0 ? '#ff8a7a' : PALETTE.muted;
+  ctx.fillText(G.wanted.stars > 0 ? `HEAT ${Math.round(G.wanted.heat)}` : 'CLEAN', 1264, 54);
+  ctx.textAlign = 'left';
+  const pdH = drawPdPanel(ctx, G, LAYOUT.pdPanel.x, LAYOUT.pdPanel.y, LAYOUT.pdPanel.w);
+  drawMinimapPlus(ctx, G, LAYOUT.minimap.x, minimapY(pdH), LAYOUT.minimap.w, LAYOUT.minimap.h);
+  // ---- Timer top-centre.
+  drawMissionTimer(ctx, G, LAYOUT.timer.cx, LAYOUT.timer.y);
+  // ---- Toast under the timer.
   if (G.toastT > 0 && G.toast) {
-    ctx.font = 'bold 18px ' + FONT;
-    const w = ctx.measureText(G.toast).width + 36;
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect((1280 - w) / 2, 12, w, 36);
+    ctx.font = 'bold 15px sans-serif';
+    const w = ctx.measureText(G.toast).width + 24;
+    ctx.fillStyle = 'rgba(16,20,28,0.88)';
+    ctx.fillRect(LAYOUT.toast.cx - w / 2, LAYOUT.toast.y, w, 30);
     ctx.strokeStyle = PALETTE.panelEdge;
-    ctx.strokeRect((1280 - w) / 2, 12, w, 36);
+    ctx.strokeRect(LAYOUT.toast.cx - w / 2 + 0.5, LAYOUT.toast.y + 0.5, w - 1, 29);
+    ctx.fillStyle = PALETTE.text;
     ctx.textAlign = 'center';
-    ctx.fillStyle = PALETTE.marker;
-    ctx.fillText(G.toast, 640, 36);
+    ctx.fillText(G.toast, LAYOUT.toast.cx, LAYOUT.toast.y + 20);
     ctx.textAlign = 'left';
   }
-
-  // --- Day banner (centre) ---
+  // ---- Day banner (big centre flash on a new day).
   if (G.dayBannerT > 0 && G.dayBanner) {
+    ctx.save();
     ctx.globalAlpha = Math.min(1, G.dayBannerT);
-    ctx.font = 'bold 44px ' + FONT;
+    ctx.font = 'bold 44px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillStyle = PALETTE.text;
-    ctx.shadowColor = '#000';
-    ctx.shadowBlur = 12;
+    ctx.fillStyle = '#ffcf3f';
     ctx.fillText(G.dayBanner, 640, 300);
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
+    ctx.restore();
     ctx.textAlign = 'left';
   }
-
-  // --- Mission dialog box (bottom centre) ---
-  const d = G.missions.dialog;
-  if (d) {
-    const line = d.lines[d.line] || '';
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(240, 720 - 150, 800, 84);
-    ctx.strokeStyle = PALETTE.panelEdge;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(240, 720 - 150, 800, 84);
-    ctx.font = 'bold 14px ' + FONT;
-    ctx.fillStyle = PALETTE.marker;
-    ctx.fillText(m ? m.giver.toUpperCase() + '  —  ' + m.title.toUpperCase() : '', 260, 720 - 122);
-    ctx.font = '16px ' + FONT;
+  // ---- District banner (mid-lower centre, clear of the dialog).
+  drawDistrictBanner(ctx, G, LAYOUT.banner.cx, 440);
+  // ---- Dialog above the weapon slots.
+  if (G.dialogue) drawDialog(ctx, G, LAYOUT.dialog.cx, LAYOUT.dialog.y, LAYOUT.dialog.w);
+  // ---- Weapons bottom-centre.
+  drawWeapons(ctx, G, LAYOUT.weapons.cx, LAYOUT.weapons.y);
+  // ---- Speed + car bottom-right, radio just beneath it.
+  ctx.textAlign = 'right';
+  if (p.car) {
+    const mph = Math.round(Math.abs(p.car.speed) * 0.24);
+    ctx.font = 'bold 22px sans-serif';
     ctx.fillStyle = PALETTE.text;
-    wrapText(ctx, line, 260, 720 - 96, 760, 20);
-    ctx.font = '12px ' + FONT;
+    ctx.fillText(`${mph} MPH`, LAYOUT.speed.x, LAYOUT.speed.y);
+    ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = PALETTE.muted;
-    ctx.fillText('Enter / click to continue  (' + (d.line + 1) + '/' + d.lines.length + ')', 260, 720 - 76);
+    ctx.fillText(`${p.car.model.name} · CAR ${Math.max(0, Math.round(p.car.hp))}%`, LAYOUT.speed.x, LAYOUT.speed.y + 20);
+  } else {
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillStyle = PALETTE.muted;
+    ctx.fillText('ON FOOT — press E near a car', LAYOUT.speed.x, LAYOUT.speed.y);
   }
-}
-
-/** Wrap text to a width, drawing up to two lines. */
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = String(text).split(' ');
-  let line = '';
-  let lines = 0;
-  for (const word of words) {
-    const test = line ? line + ' ' + word : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, y + lines * lineHeight);
-      lines += 1;
-      if (lines >= 2) return;
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (lines < 2) ctx.fillText(line, x, y + lines * lineHeight);
+  ctx.textAlign = 'left';
+  drawRadio(ctx, G, LAYOUT.radio.x, LAYOUT.radio.y);
+  // ---- Mute + save hint, tiny, bottom-left.
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = 'rgba(244,241,232,0.6)';
+  ctx.fillText('Q save · M mute · P pause · R radio · 1-4 weapons', 16, 708);
 }

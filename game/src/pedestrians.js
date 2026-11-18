@@ -1,74 +1,70 @@
-// pedestrians.js — The people of Porto Verde walking the sidewalks.
-// Features: pedestrians who stroll the sidewalks, turn at intersections, wait at
-// crossings, chat in place, and FLEE when a gunshot or a speeding car comes near.
-// Hitting one is a crime (wanted +1). They give the city its street life.
-import { ROADS_X, ROADS_Y, ROAD_WIDTH } from './config.js';
-import { clamp, dist, randInt, randPick } from './random.js';
-import { isOnRoad } from './world.js';
+// Pedestrians: city folk strolling the sidewalks and the beach. They flee
+// from gunfire and count as a crime if you hit them — the city remembers.
+import { ROADS_X, ROADS_Y, WORLD, BEACH_X } from './config.js';
+import { dist } from './random.js';
+import { collideBuildings } from './world.js';
 
-const PED_COLORS = ['#e8e4da', '#d06fa0', '#3fbf9f', '#e8b73a', '#7d8ba0', '#c96f4a', '#5f8f7b', '#a06a8f'];
-const PED_NAMES = ['Ana', 'Bruno', 'Celia', 'Diego', 'Elena', 'Felix', 'Gabi', 'Hugo', 'Ines', 'Jorge', 'Kira', 'Leo', 'Mia', 'Nico', 'Olga', 'Pablo'];
+const SHIRTS = ['#e2453c', '#3fa7c9', '#d9a441', '#7fae62', '#a06a8f', '#e8e0d0', '#5f8f7b'];
 
-/** Spawn n pedestrians on sidewalks near the roads. */
 export function createPedestrians(G, count) {
   const list = [];
-  for (let i = 0; i < count; i += 1) {
-    const vertical = G.random() < 0.5;
-    let x;
-    let y;
-    if (vertical) {
-      x = randPick(G.random, ROADS_X) + (G.random() < 0.5 ? -1 : 1) * (ROAD_WIDTH / 2 + 14);
-      y = randInt(G.random, 80, 2320);
+  for (let i = 0; i < count; i++) {
+    const onBeach = G.random() < 0.25;
+    let x; let y;
+    if (onBeach) {
+      x = 268 + G.random() * (BEACH_X - 268);
+      y = 60 + G.random() * (WORLD.h - 120);
+    } else if (G.random() < 0.5) {
+      const road = ROADS_X[Math.floor(G.random() * ROADS_X.length)];
+      x = road + (G.random() < 0.5 ? -66 : 66);
+      y = 80 + G.random() * (WORLD.h - 160);
     } else {
-      x = randInt(G.random, 400, 3120);
-      y = randPick(G.random, ROADS_Y) + (G.random() < 0.5 ? -1 : 1) * (ROAD_WIDTH / 2 + 14);
+      const road = ROADS_Y[Math.floor(G.random() * ROADS_Y.length)];
+      y = road + (G.random() < 0.5 ? -66 : 66);
+      x = 380 + G.random() * (WORLD.w - 760);
     }
+    const fixed = collideBuildings(G.city.buildings, x, y, 12);
     list.push({
-      x, y, angle: G.random() * Math.PI * 2, speed: randInt(G.random, 35, 70),
-      color: randPick(G.random, PED_COLORS), name: randPick(G.random, PED_NAMES),
-      flee: 0, wait: G.random() * 3, bob: G.random() * 6,
+      x: fixed.x, y: fixed.y,
+      angle: G.random() * Math.PI * 2,
+      speed: 28 + G.random() * 42,
+      tx: fixed.x, ty: fixed.y,
+      shirt: SHIRTS[Math.floor(G.random() * SHIRTS.length)],
+      fleeing: 0,
     });
   }
   return list;
 }
 
-/** One pedestrian step: stroll, turn at intersections, flee from danger. */
 export function updatePedestrians(G, dt) {
-  const p = G.player;
-  for (const ped of G.peds) {
-    ped.bob += dt * 6;
-    // Flee from gunfire near the player or a fast car.
-    let danger = false;
-    if (G.shotsFired > 0 && dist(ped.x, ped.y, p.x, p.y) < 420) danger = true;
-    if (p.car && Math.abs(p.car.speed) > 300 && dist(ped.x, ped.y, p.car.x, p.car.y) < 260) danger = true;
-    if (danger) ped.flee = 2.5;
-    if (ped.flee > 0) {
-      ped.flee -= dt;
-      const dx = ped.x - p.x;
-      const dy = ped.y - p.y;
-      const d = Math.hypot(dx, dy) || 1;
-      ped.x += (dx / d) * 190 * dt;
-      ped.y += (dy / d) * 190 * dt;
-      ped.angle = Math.atan2(dy, dx);
-    } else {
-      if (ped.wait > 0) {
-        ped.wait -= dt;
-      } else {
-        ped.x += Math.cos(ped.angle) * ped.speed * dt;
-        ped.y += Math.sin(ped.angle) * ped.speed * dt;
-        // Turn at intersections; never walk into the sea or a building.
-        const nearX = ROADS_X.find((rx) => Math.abs(ped.x - rx) < 70);
-        const nearY = ROADS_Y.find((ry) => Math.abs(ped.y - ry) < 70);
-        if ((nearX !== undefined || nearY !== undefined) && G.random() < dt * 0.8) {
-          ped.angle = Math.floor(G.random() * 4) * (Math.PI / 2);
-          ped.wait = G.random() * 2;
-        }
-        if (ped.x < 350 || isOnRoad(ped.x, ped.y)) {
-          ped.angle += Math.PI / 2;
-        }
+  const px = G.player.car ? G.player.car.x : G.player.x;
+  const py = G.player.car ? G.player.car.y : G.player.y;
+  for (const p of G.peds) {
+    if (p.fleeing > 0) {
+      p.fleeing -= dt;
+      const d = dist(p.x, p.y, px, py);
+      if (d < 260 && d > 1) {
+        p.angle = Math.atan2(p.y - py, p.x - px);
+        p.tx = p.x + Math.cos(p.angle) * 120;
+        p.ty = p.y + Math.sin(p.angle) * 120;
       }
     }
-    ped.x = clamp(ped.x, 345, 3180);
-    ped.y = clamp(ped.y, 20, 2380);
+    const d = dist(p.x, p.y, p.tx, p.ty);
+    if (d < 12) {
+      const a = G.random() * Math.PI * 2;
+      const step = 90 + G.random() * 160;
+      p.tx = p.x + Math.cos(a) * step;
+      p.ty = p.y + Math.sin(a) * step;
+      p.tx = Math.max(268, Math.min(WORLD.w - 20, p.tx));
+      p.ty = Math.max(30, Math.min(WORLD.h - 20, p.ty));
+    } else {
+      p.angle = Math.atan2(p.ty - p.y, p.tx - p.x);
+    }
+    const sp = p.fleeing > 0 ? p.speed * 2.4 : p.speed;
+    p.x += Math.cos(p.angle) * sp * dt;
+    p.y += Math.sin(p.angle) * sp * dt;
+    const fixed = collideBuildings(G.city.buildings, p.x, p.y, 10);
+    p.x = fixed.x;
+    p.y = fixed.y;
   }
 }

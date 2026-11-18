@@ -1,70 +1,58 @@
 # Porto Verde: Three Days in the Sun
 
-[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![rank](https://make.fun/badge/gta6-01/besan11/gta6-01/rank.svg)](https://make.fun/bounty/gta6-01)
-[![reward](https://make.fun/badge/gta6-01/besan11/gta6-01/reward.svg)](https://make.fun/bounty/gta6-01)
+![gta6-01](https://make.fun/badge/gta6-01.svg)
+![rank](https://make.fun/badge/gta6-01/besan11/gta6-01/rank.svg)
+![reward](https://make.fun/badge/gta6-01/besan11/gta6-01/reward.svg)
 
-An open-world crime game in the spirit of GTA 6 — fully original. Built for the
-[make.fun "Make GTA 6" bounty](https://make.fun/bounty/gta6-01).
+A complete open-world crime game for the [Make GTA 6 bounty](https://make.fun/competitions/gta6-01) — fully original city, characters, story and names. Nothing here is from Rockstar.
 
 ## The game
 
-**Porto Verde** is a fictional sun-soaked coastal city: sea and beach on the west,
-six avenues and six streets, the Marina, Old Town, Palm Heights, Market Row, the
-Casino Strip, Harbor South and the Airstrip Flats. **Dario Cruz** is back after
-three years away, broke and out of options. **Mara Solis** has work for him —
-**12 story missions across 3 days** — and the city is watching.
+Dario Cruz is back in Porto Verde after three years away. Mara Solis has the jobs, Kessler has the city. Twelve missions across three days — from a quiet pickup at the Marina Cafe to a vault job on the Casino Strip and a dawn flight out of the airstrip.
 
-- **Explore on foot and by car** — walk the sidewalks, steal any parked car (E) and drive it
-- **Living streets** — traffic that follows the roads, pedestrians who stroll, chat and flee
-- **Wanted level** — 0–5 stars with a HEAT meter; the Porto Verde police chase, ram and bust you
-- **Missions + story** — go-to, drive, collect, fight, chase, escape and defend objectives, with dialogue briefings
-- **Combat** — punch (F) and mouse-aimed pistol (click), thugs who chase and shoot back
-- **HUD + minimap** — money, health, wanted stars, day/time clock, district, mission panel, car speed/health
-- **Save game** — autosaves after every mission, manual save (Q), Continue from the title screen
-- **Polish** — start / pause / wasted / busted / victory screens, camera that follows you, crash and explosion effects, synthesised WebAudio sound (engine, sirens, gunshots, music) — no audio files, no network requests
+**The city:** a sun-soaked coastal town you can explore on foot or by car — traffic, pedestrians, a living beach with umbrellas and boats, six districts with their own flavour, and a golden-hour sky over the Sunset Pier.
 
-## Controls
+**The systems:**
+
+- **12 missions / 3 days** with briefings, dialogue portraits, stages (`Stage x/y`) and a preview of the next job
+- **Wanted 0–5 + Porto Verde PD response panel** — named units, officers, distances and live status (`pursuing` / `en route` / `RAMMING`), plus the AIR-1 helicopter with a spotlight at four stars
+- **Combat** — fists and three unlockable guns (Tide 9mm, Squall SMG, Breaker 12) with ammo
+- **REP** — ranks from NOBODY to BAY LEGEND, earned from missions, escapes and takedowns
+- **Radio** — three stations (CORAL FM 96.4, WAVE 88.1, BRISA BOSSA 101.2) with named tracks
+- **Districts** — banners with flavour text as you cross neighbourhoods
+- **Mission timers** — defend the cafe for 45 seconds, beat the sunset, outrun the vault alarm
+- **HUD + big minimap** — 300×210 with a dashed route to the objective and a pulsing marker
+- **Save & continue** — progress persists in localStorage; WASTED and BUSTED are real endings
+- **Synthesised sound** — WebAudio engine, sirens, rotor and music, no audio files
+
+## How to play
+
+Serve it locally and open it in a desktop browser:
+
+```
+node serve.ts
+# http://localhost:8080
+```
 
 | Key | Action |
-|---|---|
-| WASD / Arrows | Walk / drive |
+| --- | --- |
+| WASD / Arrows | Move (on foot) / drive (in a car) |
 | Shift | Run |
+| Mouse + click | Aim and shoot |
 | E | Enter / exit car |
 | F | Punch |
-| Mouse + click | Aim / shoot |
-| Space | Handbrake |
-| Q | Save game |
-| P / Esc | Pause |
+| 1–4 | Switch weapon |
+| R | Change radio station |
+| Q | Save |
 | M | Mute |
-| Enter | Confirm / start |
+| P / Esc | Pause |
+| Enter | Confirm / advance dialogue |
+| C | Continue a save (title screen) |
 
-## Play it
+## Shots
 
-```sh
-node serve.ts
-# open http://localhost:8080
-```
+Four real renders of the game itself live in `screenshots/` — the cover is a four-star chase in front of the Casino Verde on Day 3, with the helicopter overhead, the PD panel live, Mara on the line, and the vault alarm running up. Re-render them with `node playtest.mjs`.
 
-No build step, no dependencies, no network requests — just static files under `game/`.
+## Tech
 
-## Screenshots
-
-The four screenshots in `screenshots/` are real renders of the game in a browser
-(`?shot=cover|title|chase|mission&seed=7`): the cover is the densest chase frame,
-then the title screen, a police chase, and a mission briefing on foot.
-
-## Entry
-
-`main.ts` (Node 22, standard library only) copies `game/` and `screenshots/` to
-`/output` and writes `/output/dossier.json` with `buildDossier` from
-`vendor/makefun-game.ts`. Verify locally:
-
-```sh
-mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-```
-
-## License
-
-MIT — see [LICENSE](LICENSE). Porto Verde, Dario Cruz, Mara Solis and every other
-name, character and place in this game are original inventions of this project.
+Plain static files under `game/` — ES modules, no build step, no network requests, no libraries. Deterministic: one seed drives every random choice, so two runs of the dossier builder produce the same bytes.

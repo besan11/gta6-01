@@ -1,6 +1,5 @@
-// serve.ts — A tiny static server for game/ (Node 22, standard library only).
-// `node serve.ts` serves game/ on http://localhost:8080 so the game can be played
-// in desktop Chrome with no build step. Development convenience only.
+// A tiny static server for game/ (Node 22, standard library only).
+// `node serve.ts` serves game/ on http://localhost:8080, or pass --port.
 import { createReadStream, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
@@ -12,21 +11,20 @@ const portIndex = args.indexOf('--port');
 const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
 const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
 
-const MIME: Record<string, string> = {
+const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.txt': 'text/plain; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
 };
 
 createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+  let pathname;
   try {
     pathname = decodeURIComponent(url.pathname);
   } catch {
@@ -39,7 +37,7 @@ createServer((request, response) => {
     response.writeHead(403).end('forbidden');
     return;
   }
-  let size: number;
+  let size;
   try {
     const stats = statSync(file);
     if (!stats.isFile()) throw new Error('not a file');

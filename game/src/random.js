@@ -1,9 +1,9 @@
-// random.js — Seeded random numbers (mulberry32) plus small helpers.
-// Features: deterministic city generation and traffic so ?seed=N always builds the
-// same Porto Verde, which is what makes the screenshot scenes repeatable.
+// Seeded randomness only — the whole game is reproducible from one seed.
+// Nothing in the render path may call Math.random() or Date.now().
 export function createRandom(seed) {
-  let a = seed | 0;
-  return function random() {
+  let a = seed >>> 0;
+  return function next() {
+    a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
@@ -11,30 +11,12 @@ export function createRandom(seed) {
   };
 }
 
-/** Integer in [min, max] from a seeded random function. */
-export function randInt(random, min, max) {
-  return min + Math.floor(random() * (max - min + 1));
+export function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
-/** One element of an array, picked by a seeded random function. */
-export function randPick(random, list) {
-  return list[Math.floor(random() * list.length)];
-}
-
-/** Clamp a value into [min, max]. */
-export function clamp(value, min, max) {
-  return value < min ? min : value > max ? max : value;
-}
-
-/** Shortest signed angle difference, in radians. */
-export function angleDiff(a, b) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
-/** Distance between two points. */
-export function dist(ax, ay, bx, by) {
-  return Math.hypot(ax - bx, ay - by);
+export function dist(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
 }

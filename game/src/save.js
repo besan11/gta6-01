@@ -1,64 +1,63 @@
-// save.js — Saving Porto Verde: continue where Dario left off.
-// Features: save the mission, money, health, day/time and position to localStorage
-// (autosave after every mission, manual save with Q), load it back on Continue,
-// and detect whether a save exists for the title screen. Browser-only storage.
+// Save / load through localStorage. Schema v1 is kept exactly, with rep and
+// weapon ammo riding along as optional fields with safe defaults.
 import { SAVE_KEY } from './config.js';
+import { clamp } from './random.js';
 
-/** Write the current progress to localStorage. */
 export function saveGame(G) {
   try {
-    const p = G.player;
     const data = {
       version: 1,
       mission: G.missions.index,
       completed: G.missions.completedCount,
-      money: p.money,
-      hp: p.hp,
+      money: G.player.money,
+      hp: G.player.hp,
       day: G.clock.day,
       hour: G.clock.hour,
       minute: G.clock.minute,
-      x: p.x,
-      y: p.y,
-      savedAt: Date.now(),
+      x: G.player.x,
+      y: G.player.y,
+      savedAt: G.time,
+      rep: G.rep ? G.rep.points : 0,
+      ammo: G.weapons ? G.weapons.slots.map((s) => s.ammo) : [],
     };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    G.toast = 'Progress saved — see you soon, Dario.';
-    G.toastT = 2.5;
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    G.toast = 'Game saved.';
+    G.toastT = 2;
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-/** Read the save, or null when there is none / it is unreadable. */
 export function loadSave() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
     if (!data || data.version !== 1) return null;
     return data;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-/** True when a save exists to continue from. */
 export function hasSave() {
   return loadSave() !== null;
 }
 
-/** Apply a loaded save to a fresh game state. */
 export function applySave(G, data) {
-  G.missions.index = Math.min(data.mission || 0, 11);
-  G.missions.completedCount = data.completed || 0;
-  G.player.money = data.money || 0;
-  G.player.hp = data.hp || 100;
-  G.clock.day = data.day || 1;
-  G.clock.hour = data.hour || 8;
-  G.clock.minute = data.minute || 0;
-  G.player.x = data.x || 660;
-  G.player.y = data.y || 470;
-  G.player.onFoot = true;
-  G.player.car = null;
+  G.missions.index = clamp(data.mission | 0, 0, 11);
+  G.missions.completedCount = clamp(data.completed | 0, 0, 12);
+  G.player.money = Math.max(0, data.money | 0);
+  G.player.hp = clamp(data.hp | 0, 1, 100);
+  G.clock.day = clamp(data.day | 0, 1, 3);
+  G.clock.hour = clamp(data.hour | 0, 0, 22);
+  G.clock.minute = clamp(data.minute | 0, 0, 59);
+  G.player.x = clamp(data.x || 534, 274, 3184);
+  G.player.y = clamp(data.y || 540, 16, 2384);
+  if (G.rep && typeof data.rep === 'number') G.rep.points = Math.max(0, data.rep);
+  if (G.weapons && Array.isArray(data.ammo)) {
+    data.ammo.forEach((a, i) => {
+      if (G.weapons.slots[i] && typeof a === 'number' && isFinite(a)) G.weapons.slots[i].ammo = a;
+    });
+  }
+  G.missions.step = 0;
+  G.missions.dialog = null;
+  G.dialogue = null;
 }
