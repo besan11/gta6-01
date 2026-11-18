@@ -1,92 +1,73 @@
-// police.js — The Porto Verde Police Department: patrol cars and foot cops.
-// Features: police cars that spawn when wanted, chase the player through the
-// streets, ram the player's car, and BUST the player on foot when they corner him;
-// foot cops who chase on foot. The more stars, the more units respond.
-import { POLICE } from './config.js';
-import { angleDiff, clamp, dist } from './random.js';
+// Porto Verde v6 — Porto Verde PD: how many cruisers a wanted level buys, and
+// how they hunt. Cops ram, they corner, and on foot they close in to bust.
+import { COP_MAX, COP_ACCEL, COP_RAM, BUST_RADIUS, COP_SPAWN_DIST } from './config.js';
+import { clamp, dist } from './random.js';
 import { collideBuildings } from './world.js';
-import { createCar, damageCar } from './cars.js';
-import { hurtPlayer } from './player.js';
+import { addWanted } from './wanted.js';
 
-const COP_MODEL = { name: 'PVPD Interceptor', color: '#22447f', topSpeed: 560, accel: 520 };
-
-/** How many police cars respond to each wanted level. */
 export function copsWanted(stars) {
-  return stars <= 0 ? 0 : Math.min(4, stars + 1);
+  return [0, 1, 2, 3, 4, 5][stars] || 0;
 }
 
-/** Spawn one police car on a road near the player. */
-function spawnCopCar(G) {
+export function spawnCopCar(G) {
   const p = G.player;
   const angle = G.random() * Math.PI * 2;
-  const x = clamp(p.x + Math.cos(angle) * POLICE.spawnDistance, 400, 3100);
-  const y = clamp(p.y + Math.sin(angle) * POLICE.spawnDistance, 80, 2320);
-  const car = createCar(x, y, angle, COP_MODEL, 'police');
-  car.siren = true;
+  const x = clamp(p.x + Math.cos(angle) * COP_SPAWN_DIST, 300, 3150);
+  const y = clamp(p.y + Math.sin(angle) * COP_SPAWN_DIST, 60, 2340);
+  const fixed = collideBuildings(G.city.buildings, x, y, 34);
+  const car = {
+    x: fixed.x, y: fixed.y, angle: 0, speed: 0, driver: 'cop',
+    model: { name: 'PD Interceptor', color: '#22447f', top: COP_MAX, accel: COP_ACCEL },
+    wrecked: false, hp: 120, police: true, name: 'PD Interceptor', siren: true,
+  };
   G.police.push(car);
   G.cars.push(car);
   return car;
 }
 
-/** One police step: keep the right number of units, chase, ram, and bust. */
 export function updatePolice(G, dt) {
-  const stars = G.wanted.stars;
-  const want = copsWanted(stars);
-  // Spawn missing units, remove extras when the heat falls.
+  const p = G.player;
+  const want = copsWanted(G.wanted.stars);
   while (G.police.length < want) spawnCopCar(G);
   while (G.police.length > want) {
-    const car = G.police.pop();
-    const i = G.cars.indexOf(car);
-    if (i >= 0) G.cars.splice(i, 1);
+    const extra = G.police.pop();
+    const ci = G.cars.indexOf(extra);
+    if (ci >= 0) G.cars.splice(ci, 1);
   }
-  const p = G.player;
-  const px = p.car ? p.car.x : p.x;
-  const py = p.car ? p.car.y : p.y;
+  G.bustTimer = G.bustTimer || 0;
+  let nearFoot = false;
   for (const cop of G.police) {
-    if (cop.wrecked || cop.driver === 'player') continue; // a stolen police car is the player's now
-    const targetAngle = Math.atan2(py - cop.y, px - cop.x);
-    const turn = angleDiff(cop.angle, targetAngle);
-    cop.angle += clamp(turn, -2.8 * dt, 2.8 * dt);
-    cop.speed = Math.min(cop.speed + POLICE.accel * dt, POLICE.maxSpeed);
+    if (cop.wrecked) continue;
+    const d = dist(cop.x, cop.y, p.x, p.y);
+    const wantAngle = Math.atan2(p.y - cop.y, p.x - cop.x);
+    let da = wantAngle - cop.angle;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    cop.angle += clamp(da, -2.4 * dt, 2.4 * dt);
+    cop.speed = Math.min(COP_MAX, cop.speed + COP_ACCEL * dt);
     const nx = cop.x + Math.cos(cop.angle) * cop.speed * dt;
     const ny = cop.y + Math.sin(cop.angle) * cop.speed * dt;
-    const fixed = collideBuildings(G.city.buildings, nx, ny, 26);
-    cop.x = clamp(fixed.x, 30, 3170);
-    cop.y = clamp(fixed.y, 30, 2370);
-    // Ram: damage the player's car, or hurt and corner the player on foot.
-    // A ram lands at most once per 0.8 s per unit, so a chase is a chase, not a shredder.
-    const d = dist(cop.x, cop.y, px, py);
-    cop.ramT = Math.max(0, (cop.ramT || 0) - dt);
-    if (d < 58) {
+    const fixed = collideBuildings(G.city.buildings, nx, ny, 32);
+    cop.x = fixed.x; cop.y = fixed.y;
+    if (d < 70) {
       if (p.car) {
-        if (cop.ramT <= 0) {
-          cop.ramT = 0.8;
-          damageCar(G, p.car, POLICE.ramDamage);
-          cop.speed *= 0.92;
-          G.audio.crash();
-        }
-      } else if (p.hp > 0) {
-        G.bustTimer = (G.bustTimer || 0) + dt;
-        if (G.bustTimer > 1.6) {
-          G.busted = true;
-          G.audio.busted();
-        }
-        hurtPlayer(G, 6 * dt);
+        p.car.hp -= COP_RAM * dt * 2;
+        if (p.car.hp <= 0) { p.car.wrecked = true; p.car.speed = 0; }
+      } else {
+        nearFoot = true;
       }
-    } else {
-      G.bustTimer = Math.max(0, (G.bustTimer || 0) - dt * 2);
+      cop.speed *= 0.5;
     }
+    if (d < BUST_RADIUS && p.onFoot && G.wanted.stars >= 1) nearFoot = true;
   }
-  // Wrecked cop cars stop responding and are towed away after a while.
-  for (let i = G.police.length - 1; i >= 0; i -= 1) {
-    const cop = G.police[i];
-    if (cop.wrecked) {
-      cop.wreckT = (cop.wreckT || 0) + dt;
-      if (cop.wreckT > 12) {
-        G.police.splice(i, 1);
-        const j = G.cars.indexOf(cop);
-        if (j >= 0) G.cars.splice(j, 1);
-      }
+  if (nearFoot && p.onFoot && G.wanted.stars >= 1) {
+    G.bustTimer += dt;
+    if (G.bustTimer > 1.4) {
+      G.busted = true;
+      if (G.audio) G.audio.busted();
     }
+  } else {
+    G.bustTimer = 0;
   }
+  if (G.audio) G.audio.setSiren(G.police.length > 0 && G.wanted.stars >= 1);
 }

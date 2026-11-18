@@ -1,176 +1,156 @@
-// shots.js — The four screenshot scenes behind ?shot=cover|title|chase|mission.
-// Features: each scene plays the REAL game forward from a fresh seeded world with
-// a simple autopilot (drive the road, keep the lane, brake for traffic), so every
-// frame is what a short game really looks like and the same seed always gives the
-// same frame. Sets window.__shotReady when the scene is painted twice.
-//   cover   — dense chase gameplay: wanted 3, police on the tail, mission 2 live
-//   title   — title screen over the living city
-//   chase   — wanted 4, police ramming the player's car at speed
-//   mission — on foot at the Dockside Bar, mission 4 briefing + thugs closing in
-import { STEP } from './config.js';
-import { createCar, enterCar } from './cars.js';
-import { openBriefing, prepareStep } from './missions.js';
-import { SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Porto Verde v6 — the four staged scenes behind ?shot=cover|title|chase|mission.
+// Every scene is a real game state (real rules, real HUD), arranged once from
+// the seeded stream so the same seed always paints the same frame. The cover
+// is the late-state heist: Day 3, four stars, AIR-1 overhead, the PD panel
+// full, Mara on the radio of the dialogue box, and the vault alarm climbing.
+import { SCREEN_TITLE, SCREEN_PLAY } from './render.js';
+import { createCar, enterCar, CAR_MODELS } from './cars.js';
+import { createTraffic } from './traffic.js';
+import { createPedestrians } from './pedestrians.js';
+import { openBriefing, prepareStep, MISSIONS } from './missions.js';
+import { openDialogue } from './dialogue.js';
+import { spawnCopCar } from './police.js';
 
-/** Steer a car along its road: keep to the lane, brake for the car ahead. */
-function autopilotDrive(G, car, dt) {
-  const vertical = Math.abs(Math.cos(car.angle)) < 0.5;
-  const roadX = G.roadsX.reduce((a, b) => (Math.abs(b - car.x) < Math.abs(a - car.x) ? b : a));
-  const roadY = G.roadsY.reduce((a, b) => (Math.abs(b - car.y) < Math.abs(a - b) ? b : a));
-  let steer = 0;
-  let throttle = -1; // move.y < 0 accelerates
-  if (vertical) {
-    const lane = roadX + (car.angle > 0 ? 22 : -22);
-    steer = car.x < lane - 6 ? 1 : car.x > lane + 6 ? -1 : 0;
-    if (Math.sin(car.angle) < 0) steer = -steer;
-  } else {
-    const lane = roadY + (car.angle > -Math.PI / 2 && car.angle < Math.PI / 2 ? 22 : -22);
-    steer = car.y < lane - 6 ? 1 : car.y > lane + 6 ? -1 : 0;
-    if (Math.cos(car.angle) < 0) steer = -steer;
+function crowdNear(G, cx, cy, cars, peds) {
+  for (let i = 0; i < cars; i += 1) {
+    const a = (i / Math.max(1, cars)) * Math.PI * 2 + 0.4;
+    const d = 180 + (i % 3) * 90;
+    const t = G.traffic[i % G.traffic.length];
+    if (!t) continue;
+    t.x = cx + Math.cos(a) * d;
+    t.y = cy + Math.sin(a) * d;
+    t.wrecked = false;
   }
-  // Brake for a car just ahead.
-  for (const other of G.cars) {
-    if (other === car || other.wrecked) continue;
-    const dx = other.x - car.x;
-    const dy = other.y - car.y;
-    const ahead = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
-    const side = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
-    if (ahead > 0 && ahead < 120 && side < 34) { throttle = 1; break; }
-  }
-  return { x: steer, y: throttle };
-}
-
-/** Run the live simulation for `seconds` with the autopilot driving the player's car. */
-function simulateDrive(G, seconds) {
-  const steps = Math.round(seconds / STEP);
-  for (let i = 0; i < steps; i += 1) {
-    const car = G.player.car;
-    if (car) {
-      const move = autopilotDrive(G, car, STEP);
-      G.stepWorld(move, STEP, false);
-    } else {
-      G.stepWorld({ x: 0, y: 0 }, STEP, false);
-    }
+  for (let i = 0; i < peds; i += 1) {
+    const a = (i / Math.max(1, peds)) * Math.PI * 2 + 0.9;
+    const d = 90 + (i % 4) * 55;
+    const p = G.peds[i % G.peds.length];
+    if (!p) continue;
+    p.x = cx + Math.cos(a) * d;
+    p.y = cy + Math.sin(a) * d;
+    p.beach = false;
   }
 }
 
-/** After a staged drive, make sure the player's car is intact and driven again:
-    a screenshot stages a chase, it does not stage a wreck. */
-function restorePlayerCar(G) {
-  const car = G._shotCar;
-  if (!car) return;
-  car.wrecked = false;
-  car.hp = 100;
-  if (Math.abs(car.speed) < 200) car.speed = 380;
-  const p = G.player;
-  if (!p.car) {
-    p.car = car;
-    p.onFoot = false;
-    car.driver = 'player';
-  }
-  p.x = car.x;
-  p.y = car.y;
-  p.angle = car.angle;
-  G.toast = '';
-  G.toastT = 0;
-  G.dayBannerT = 0;
-  // Clear any wrecked traffic that piled up around the player.
-  for (const t of G.traffic) {
-    if (t.wrecked && Math.hypot(t.x - car.x, t.y - car.y) < 300) {
-      t.wrecked = false;
-      t.hp = 100;
-    }
-  }
-}
-
-/** Put the player in a fast car on a straight avenue, cops already closing in. */
-function stageChaseScene(G, wantedStars, copCount, money, hour, minute) {
-  const car = createCar(1300, 900, Math.PI / 2, G.carModels[0], 'player');
+function putPlayerInCar(G, x, y, modelIdx) {
+  const car = createCar(x, y, -0.5, CAR_MODELS[modelIdx || 0], null);
+  car.owned = true;
   G.cars.push(car);
-  G.player.x = car.x;
-  G.player.y = car.y;
   enterCar(G, car);
-  G._shotCar = car;
-  G.wanted.stars = wantedStars;
-  G.wanted.heat = 40 + wantedStars * 10;
-  G.wanted.lastCrime = G.time;
-  G.player.money = money;
-  G.clock.day = 1;
-  G.clock.hour = hour;
-  G.clock.minute = minute;
-  // Police cars right behind and beside the player.
-  for (let i = 0; i < copCount; i += 1) {
-    const cop = createCar(1300 + (i % 2 === 0 ? -70 : 70), 900 - 160 - i * 130, Math.PI / 2, G.copModel, 'police');
-    cop.siren = true;
-    cop.speed = 420;
-    G.police.push(cop);
-    G.cars.push(cop);
-  }
-  // Traffic ahead to dodge.
-  for (let i = 0; i < 5; i += 1) {
-    const t = G.traffic[i];
-    if (t) { t.x = 1300 + (i % 2 === 0 ? 22 : -22); t.y = 1150 + i * 170; t.angle = Math.PI / 2; t.speed = 150; }
-  }
-  // Pedestrians on the sidewalks nearby.
-  for (let i = 0; i < 6; i += 1) {
-    const ped = G.peds[i];
-    if (ped) { ped.x = 1300 + (i % 2 === 0 ? -80 : 80); ped.y = 1000 + i * 90; }
+  return car;
+}
+
+function placeCops(G, cx, cy, n) {
+  G.police = [];
+  G.cars = G.cars.filter((c) => !c.police);
+  for (let i = 0; i < n; i += 1) {
+    const cop = spawnCopCar(G);
+    const a = (i / n) * Math.PI * 2 + 0.7;
+    const d = 150 + (i % 2) * 90;
+    cop.x = cx + Math.cos(a) * d;
+    cop.y = cy + Math.sin(a) * d;
+    cop.speed = 260;
+    cop.angle = Math.atan2(cy - cop.y, cx - cop.x);
   }
 }
 
-/**
- * Set the game to the named scene and return the screen to draw over it.
- * Names: cover, title, chase, mission. Any other name stages the title.
- */
-export function stageShot(name, G) {
-  if (name === 'title') {
-    G.player.x = 660;
-    G.player.y = 470;
-    G.stepWorld({ x: 0, y: 0 }, STEP, true);
-    for (let i = 0; i < 5 * 60; i += 1) G.stepWorld({ x: 0, y: 0 }, STEP, true);
-    return { screen: SCREEN_TITLE };
-  }
-  if (name === 'chase') {
-    // Mission 7 "Hot Pursuit": wanted 4, police ramming the player's car at speed.
-    G.missions.index = 6;
-    G.missions.step = 0;
-    prepareStep(G);
-    stageChaseScene(G, 4, 4, 2450, 19, 42);
-    simulateDrive(G, 3);
-    restorePlayerCar(G);
-    // One cop rams the player as the shutter falls.
-    const cop = G.police[0];
-    if (cop && G.player.car) {
-      cop.x = G.player.car.x - 40;
-      cop.y = G.player.car.y - 30;
-    }
-    return { screen: SCREEN_PLAY };
-  }
-  if (name === 'mission') {
-    // Mission 4 "First Blood": on foot at the Dockside Bar, briefing open, thugs closing in.
-    G.missions.index = 3;
-    G.missions.step = 0;
-    prepareStep(G);
-    G.player.x = 900;
-    G.player.y = 1560;
-    G.player.angle = Math.PI / 2;
-    G.player.money = 870;
-    G.clock.day = 1;
-    G.clock.hour = 20;
-    G.clock.minute = 15;
-    G.dayBannerT = 0;
-    openBriefing(G);
-    G.missions.dialog.line = 1;
-    // Stand still while the thugs close in — the frame is the briefing, not a walk.
-    for (let i = 0; i < 2.5 * 60; i += 1) G.stepWorld({ x: 0, y: 0 }, STEP, false);
-    return { screen: SCREEN_PLAY };
-  }
-  // Default: the cover — the densest gameplay frame.
-  G.missions.index = 1;
+function stageCover(G) {
+  G.missions.index = 10;
   G.missions.step = 0;
+  G.missions.completedCount = 10;
+  G.clock.day = 3;
+  G.clock.hour = 19;
+  G.clock.minute = 42;
+  G.player.money = 8450;
+  G.rep.points = 1240;
+  G.wanted.stars = 4;
+  G.wanted.heat = 88;
+  G.player.x = 2380;
+  G.player.y = 1250;
+  putPlayerInCar(G, 2380, 1250, 0);
+  G.player.car.speed = 180;
+  placeCops(G, 2380, 1250, 4);
+  G.heli.active = true;
+  G.heli.x = 2260;
+  G.heli.y = 1080;
+  G.heli.rotor = 1.2;
+  if (G.audio) G.audio.setRotor(true);
+  openBriefing(G);
   prepareStep(G);
-  stageChaseScene(G, 3, 3, 1850, 18, 7);
-  simulateDrive(G, 3);
-  restorePlayerCar(G);
+  openDialogue(G, 'Mara Solis', MISSIONS[10].brief);
+  G.district = { name: 'CASINO STRIP', flavor: 'Neon and bad decisions', bannerT: 3 };
+  G.dayBanner = 'CASINO STRIP';
+  G.dayBannerT = 3;
+  G.missionTimer.active = true;
+  G.missionTimer.remaining = 127;
+  G.missionTimer.label = 'ALARM';
+  G.radio.station = 0;
+  G.radio.track = 0;
+  G.weapons.slots[2].unlocked = true;
+  G.weapons.selected = 1;
+  G.casino.alarm = 64;
+  crowdNear(G, 2380, 1250, 6, 10);
   return { screen: SCREEN_PLAY };
+}
+
+function stageChase(G) {
+  G.missions.index = 6;
+  G.missions.step = 0;
+  G.missions.completedCount = 6;
+  G.clock.day = 2;
+  G.clock.hour = 17;
+  G.clock.minute = 30;
+  G.player.money = 2400;
+  G.rep.points = 640;
+  G.wanted.stars = 3;
+  G.wanted.heat = 62;
+  putPlayerInCar(G, 420, 1100, 3);
+  G.player.car.speed = 320;
+  G.player.car.angle = Math.PI / 2;
+  placeCops(G, 420, 1100, 3);
+  G.district = { name: 'SUNSET PIER', flavor: 'Fishermen and runaways', bannerT: 3 };
+  G.dayBanner = 'SUNSET PIER';
+  G.dayBannerT = 3;
+  openBriefing(G);
+  prepareStep(G);
+  G.missionTimer.active = false;
+  crowdNear(G, 420, 1100, 4, 8);
+  return { screen: SCREEN_PLAY };
+}
+
+function stageMission(G) {
+  G.missions.index = 3;
+  G.missions.step = 0;
+  G.missions.completedCount = 3;
+  G.clock.day = 1;
+  G.clock.hour = 16;
+  G.clock.minute = 20;
+  G.player.money = 950;
+  G.rep.points = 310;
+  G.player.x = 900;
+  G.player.y = 1550;
+  G.player.onFoot = true;
+  G.player.car = null;
+  G.wanted.stars = 0;
+  G.wanted.heat = 0;
+  openBriefing(G);
+  prepareStep(G);
+  const thugSpots = [{ x: 900, y: 1400 }, { x: 900, y: 1450 }, { x: 900, y: 1500 }]; // on the road: guaranteed open ground
+  G.enemies.forEach((e, i) => {
+    const spot = thugSpots[i % thugSpots.length];
+    e.x = spot.x; e.y = spot.y;
+  });
+  openDialogue(G, 'Mara Solis', MISSIONS[3].brief);
+  G.district = { name: 'HARBOR DISTRICT', flavor: "Cranes, crates and Kessler's men", bannerT: 0 };
+  crowdNear(G, 900, 1550, 4, 9);
+  return { screen: SCREEN_PLAY };
+}
+
+export function stageShot(name, G) {
+  G.time = 0;
+  G.clockAcc = 0;
+  if (name === 'cover') return stageCover(G);
+  if (name === 'chase') return stageChase(G);
+  if (name === 'mission') return stageMission(G);
+  return { screen: SCREEN_TITLE };
 }

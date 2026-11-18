@@ -1,80 +1,40 @@
-// traffic.js — City traffic: cars that drive the avenues and streets.
-// Features: traffic cars that follow the road grid in lanes, turn at intersections,
-// brake when the car ahead is slow, wrap around the city edges, and honk when the
-// player blocks them. They make the streets feel alive behind every screenshot.
-import { ROADS_X, ROADS_Y, ROAD_WIDTH } from './config.js';
-import { randInt, randPick } from './random.js';
-import { CAR_MODELS, createCar } from './cars.js';
+// Porto Verde v6 — traffic: ordinary Porto Verde drivers cruising the grid.
+// They keep to the roads, wrap around the map edges, and never enter buildings.
+import { ROADS_X, ROADS_Y } from './config.js';
+import { CAR_MODELS } from './cars.js';
+import { pick } from './random.js';
 
-/** Spawn n traffic cars on random roads. */
 export function createTraffic(G, count) {
   const list = [];
   for (let i = 0; i < count; i += 1) {
     const vertical = G.random() < 0.5;
-    let car;
-    if (vertical) {
-      const x = randPick(G.random, ROADS_X) + (G.random() < 0.5 ? -22 : 22);
-      const y = randInt(G.random, 60, 2340);
-      car = createCar(x, y, G.random() < 0.5 ? -Math.PI / 2 : Math.PI / 2, randPick(G.random, CAR_MODELS), 'traffic');
-    } else {
-      const x = randInt(G.random, 400, 3140);
-      const y = randPick(G.random, ROADS_Y) + (G.random() < 0.5 ? -22 : 22);
-      car = createCar(x, y, G.random() < 0.5 ? 0 : Math.PI, randPick(G.random, CAR_MODELS), 'traffic');
-    }
-    car.speed = randInt(G.random, 110, 180);
-    car.cruise = car.speed;
+    const road = vertical ? pick(G.random, ROADS_X) : pick(G.random, ROADS_Y);
+    const along = 100 + G.random() * 2200;
+    const dir = G.random() < 0.5 ? 1 : -1;
+    const model = pick(G.random, CAR_MODELS);
+    const car = {
+      x: vertical ? road : along, y: vertical ? along : road,
+      angle: vertical ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (dir > 0 ? 0 : Math.PI),
+      speed: 140 + G.random() * 90, driver: 'traffic', model,
+      wrecked: false, hp: 100, police: false, name: model.name,
+      vertical, dir, road,
+    };
     list.push(car);
   }
   return list;
 }
 
-/** One traffic step: follow the road, maybe turn, brake for cars ahead, wrap around. */
 export function updateTraffic(G, dt) {
   for (const car of G.traffic) {
-    if (car.wrecked || car.driver === 'chase') continue; // the courier is driven by the mission, not traffic
-    const vertical = Math.abs(Math.cos(car.angle)) < 0.5;
-    // At an intersection, sometimes turn onto the crossing road.
-    if (G.random() < dt * 0.25) {
-      const nearX = ROADS_X.find((rx) => Math.abs(car.x - rx) < 60);
-      const nearY = ROADS_Y.find((ry) => Math.abs(car.y - ry) < 60);
-      if (nearX !== undefined && nearY !== undefined && G.random() < 0.4) {
-        if (vertical) {
-          car.angle = G.random() < 0.5 ? 0 : Math.PI;
-          car.y = nearY + (G.random() < 0.5 ? -22 : 22);
-        } else {
-          car.angle = G.random() < 0.5 ? -Math.PI / 2 : Math.PI / 2;
-          car.x = nearX + (G.random() < 0.5 ? -22 : 22);
-        }
-      }
+    if (car.wrecked) continue;
+    if (car.vertical) {
+      car.y += car.dir * car.speed * dt;
+      if (car.y > 2380) car.y = 40;
+      if (car.y < 40) car.y = 2380;
+    } else {
+      car.x += car.dir * car.speed * dt;
+      if (car.x > 3180) car.x = 300;
+      if (car.x < 300) car.x = 3180;
     }
-    // Brake when another car (or the player) is just ahead.
-    let target = car.cruise;
-    for (const other of G.cars) {
-      if (other === car || other.wrecked) continue;
-      const dx = other.x - car.x;
-      const dy = other.y - car.y;
-      const ahead = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
-      const side = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
-      if (ahead > 0 && ahead < 110 && side < 30) { target = 0; break; }
-    }
-    if (target === 0 && G.player.car) {
-      const p = G.player.car;
-      const dx = p.x - car.x;
-      const dy = p.y - car.y;
-      const ahead = dx * Math.cos(car.angle) + dy * Math.sin(car.angle);
-      const side = Math.abs(-dx * Math.sin(car.angle) + dy * Math.cos(car.angle));
-      if (ahead > 0 && ahead < 130 && side < 34) target = 0;
-    }
-    car.speed += (target - car.speed) * Math.min(1, 2.5 * dt);
-    car.x += Math.cos(car.angle) * car.speed * dt;
-    car.y += Math.sin(car.angle) * car.speed * dt;
-    // Wrap around the city edges so traffic never runs out.
-    if (car.x < 330) car.x = 3160;
-    if (car.x > 3170) car.x = 340;
-    if (car.y < 20) car.y = 2360;
-    if (car.y > 2370) car.y = 30;
-    // Keep traffic cars out of buildings (they stay on roads, but a turn can clip a corner).
-    if (car.x < 340) car.x = 340;
   }
-  void ROAD_WIDTH;
 }

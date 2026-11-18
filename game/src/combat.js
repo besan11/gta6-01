@@ -1,165 +1,135 @@
-// combat.js — Combat in Porto Verde: fists, pistol, bullets and thugs.
-// Features: punch attacks (F) with range and facing, mouse-aimed pistol shots,
-// bullets that stop at buildings and damage enemies, cars and the player, thug AI
-// that chases the player and shoots or punches, car ramming that hurts pedestrians,
-// and muzzle-flash + hit effects. Crime from shooting raises the wanted level.
-import { PLAYER } from './config.js';
-import { angleDiff, clamp, dist } from './random.js';
-import { hitsBuilding, collideBuildings } from './world.js';
-import { damageCar } from './cars.js';
+// Porto Verde v6 — combat: fists up close, bullets at range, thugs who fight back.
+// Thugs spawn only on open ground (never on a roof) — missions.js enforces that.
+import { PUNCH_DMG, PUNCH_RANGE, PUNCH_CD, BULLET_SPEED, BULLET_DMG } from './config.js';
+import { dist } from './random.js';
 import { hurtPlayer } from './player.js';
 import { addWanted } from './wanted.js';
 
-/** Punch: hit the nearest enemy or pedestrian in front of the player. */
 export function punch(G) {
   const p = G.player;
-  if (!p.onFoot || p.punchCooldown > 0) return;
-  p.punchCooldown = PLAYER.punchCooldown;
-  G.audio.punch();
-  G.effects.push({ kind: 'punch', x: p.x + Math.cos(p.angle) * 30, y: p.y + Math.sin(p.angle) * 30, t: 0.2 });
+  if (p.punchT > 0 || !p.onFoot) return;
+  p.punchT = PUNCH_CD;
+  if (G.audio) G.audio.noise(0.08, 0.1, 600);
   for (const e of G.enemies) {
-    const d = dist(p.x, p.y, e.x, e.y);
-    const facing = Math.cos(angleDiff(p.angle, Math.atan2(e.y - p.y, e.x - p.x)));
-    if (d < PLAYER.punchRange && facing > 0.3) {
-      e.hp -= PLAYER.punchDamage;
-      G.audio.hit();
-    }
-  }
-  // Hitting a pedestrian is a crime.
-  for (const ped of G.peds) {
-    const d = dist(p.x, p.y, ped.x, ped.y);
-    const facing = Math.cos(angleDiff(p.angle, Math.atan2(ped.y - p.y, ped.x - p.x)));
-    if (d < PLAYER.punchRange && facing > 0.3) {
-      ped.flee = 3;
-      addWanted(G, 1, 'Assaulted a pedestrian');
+    if (e.hp <= 0) continue;
+    if (dist(e.x, e.y, p.x, p.y) < PUNCH_RANGE + 14) {
+      e.hp -= PUNCH_DMG;
+      e.x += Math.cos(p.angle) * 18;
+      e.y += Math.sin(p.angle) * 18;
+      G.effects.push({ kind: 'hit', x: e.x, y: e.y, t: 0, ttl: 0.3 });
+      if (e.hp <= 0) onThugDown(G, e);
     }
   }
 }
 
-/** Shoot the pistol toward the mouse (on foot) or the car's heading (driving). */
 export function shoot(G, targetX, targetY) {
   const p = G.player;
-  if (p.shootCooldown > 0) return;
-  p.shootCooldown = PLAYER.shootCooldown;
-  const ox = p.car ? p.car.x : p.x;
-  const oy = p.car ? p.car.y : p.y;
-  const angle = Math.atan2(targetY - oy, targetX - ox);
+  const w = G.weapons ? G.weapons.current() : null;
+  if (!w || w.key === 'fists') { punch(G); return; }
+  if (p.shootT > 0) return;
+  if (w.ammo <= 0) {
+    if (G.weapons) G.weapons.select(G, 0);
+    G.toast = 'Out of ammo — back to fists';
+    G.toastT = 2;
+    return;
+  }
+  p.shootT = w.cd;
+  w.ammo -= 1;
+  G.shotsFired += 1;
+  const angle = Math.atan2(targetY - p.y, targetX - p.x);
   G.bullets.push({
-    x: ox + Math.cos(angle) * 30, y: oy + Math.sin(angle) * 30,
-    angle, speed: PLAYER.bulletSpeed, from: 'player', damage: PLAYER.bulletDamage, life: 1.2,
+    x: p.x + Math.cos(angle) * 22, y: p.y + Math.sin(angle) * 22,
+    vx: Math.cos(angle) * BULLET_SPEED, vy: Math.sin(angle) * BULLET_SPEED,
+    dmg: w.dmg, fromPlayer: true, t: 0,
   });
-  G.shotsFired = 1.5;
-  G.audio.shoot();
-  G.effects.push({ kind: 'muzzle', x: ox + Math.cos(angle) * 34, y: oy + Math.sin(angle) * 34, t: 0.08 });
-  addWanted(G, 1, 'Shots fired in public');
+  if (G.audio) G.audio.noise(0.07, 0.16, 2400);
+  if (G.wanted.stars < 2) addWanted(G, 1, 'shots fired');
 }
 
-/** One combat step: move bullets, resolve hits, run thug AI, clean up the dead. */
+export function onThugDown(G, e) {
+  G.effects.push({ kind: 'down', x: e.x, y: e.y, t: 0, ttl: 1.2 });
+  if (G.rep) G.rep.add(G, 10, 'thug down');
+  if (G.weapons) G.weapons.addAmmo(G, 'tide', 12);
+  if (G.missions) G.missions.killed += 1;
+}
+
 export function updateCombat(G, dt) {
   const p = G.player;
-  if (G.shotsFired > 0) G.shotsFired -= dt;
-  // Bullets fly, stop at buildings, and hit what they touch.
-  for (let i = G.bullets.length - 1; i >= 0; i -= 1) {
-    const b = G.bullets[i];
-    b.x += Math.cos(b.angle) * b.speed * dt;
-    b.y += Math.sin(b.angle) * b.speed * dt;
-    b.life -= dt;
-    let dead = b.life <= 0 || hitsBuilding(G.city.buildings, b.x, b.y, 2);
-    if (!dead && b.from === 'player') {
-      for (const e of G.enemies) {
-        if (dist(b.x, b.y, e.x, e.y) < 20) { e.hp -= b.damage; dead = true; G.audio.hit(); break; }
-      }
-      if (!dead) {
-        for (const car of G.cars) {
-          if (car.driver === 'player' || car.wrecked) continue;
-          if (Math.abs(b.x - car.x) < 36 && Math.abs(b.y - car.y) < 22) {
-            damageCar(G, car, b.damage);
-            dead = true;
-            break;
-          }
-        }
-      }
-      if (!dead) {
-        // The mission courier (a traffic car with driver 'chase') can be shot too.
-        for (const car of G.traffic) {
-          if (car.driver !== 'chase' || car.wrecked) continue;
-          if (Math.abs(b.x - car.x) < 36 && Math.abs(b.y - car.y) < 22) {
-            damageCar(G, car, b.damage);
-            dead = true;
-            break;
-          }
-        }
-      }
-      if (!dead) {
-        for (const cop of G.police) {
-          if (Math.abs(b.x - cop.x) < 36 && Math.abs(b.y - cop.y) < 22) {
-            damageCar(G, cop, b.damage);
-            addWanted(G, 1, 'Shot at the police');
-            dead = true;
-            break;
-          }
-        }
-      }
-    }
-    if (!dead && b.from === 'enemy') {
-      const px = p.car ? p.car.x : p.x;
-      const py = p.car ? p.car.y : p.y;
-      if (dist(b.x, b.y, px, py) < (p.car ? 34 : 16)) {
-        if (p.car) damageCar(G, p.car, b.damage);
-        else if (hurtPlayer(G, b.damage)) G.wasted = true;
-        dead = true;
-      }
-    }
-    if (dead) G.bullets.splice(i, 1);
+  for (const b of G.bullets) {
+    b.t += dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
   }
-  // Thug AI: chase the player, punch up close, shoot from mid-range.
+  G.bullets = G.bullets.filter((b) => b.t < 1.6 && b.x > 240 && b.x < 3200 && b.y > 0 && b.y < 2400);
+  for (const b of [...G.bullets]) {
+    if (!b.fromPlayer) {
+      if (dist(b.x, b.y, p.x, p.y) < 16) {
+        hurtPlayer(G, b.dmg);
+        b.t = 99;
+      }
+      continue;
+    }
+    for (const e of G.enemies) {
+      if (e.hp <= 0) continue;
+      if (dist(b.x, b.y, e.x, e.y) < 18) {
+        e.hp -= b.dmg;
+        b.t = 99;
+        G.effects.push({ kind: 'hit', x: e.x, y: e.y, t: 0, ttl: 0.3 });
+        if (e.hp <= 0) onThugDown(G, e);
+        break;
+      }
+    }
+    if (b.t < 90) {
+      for (const car of G.cars) {
+        if (car === p.car || car.wrecked) continue;
+        if (Math.abs(b.x - car.x) < 34 && Math.abs(b.y - car.y) < 22) {
+          car.hp -= b.dmg;
+          b.t = 99;
+          if (car.hp <= 0 && !car.wrecked) {
+            car.wrecked = true;
+            car.speed = 0;
+            G.effects.push({ kind: 'boom', x: car.x, y: car.y, t: 0, ttl: 0.7 });
+          }
+          break;
+        }
+      }
+    }
+    if (b.t < 90 && G.missions.chaseCar && !G.missions.chaseCar.wrecked) {
+      const c = G.missions.chaseCar;
+      if (Math.abs(b.x - c.x) < 34 && Math.abs(b.y - c.y) < 22) {
+        c.hp -= b.dmg;
+        b.t = 99;
+        if (c.hp <= 0) { c.wrecked = true; c.speed = 0; }
+      }
+    }
+  }
+  G.bullets = G.bullets.filter((b) => b.t < 90);
+
   for (const e of G.enemies) {
-    const px = p.car ? p.car.x : p.x;
-    const py = p.car ? p.car.y : p.y;
-    const d = dist(e.x, e.y, px, py);
-    e.angle = Math.atan2(py - e.y, px - e.x);
-    if (d > 46) {
-      const nx = e.x + Math.cos(e.angle) * e.speed * dt;
-      const ny = e.y + Math.sin(e.angle) * e.speed * dt;
-      const fixed = collideBuildings(G.city.buildings, nx, ny, 12);
-      e.x = fixed.x;
-      e.y = fixed.y;
-    } else if (e.meleeT <= 0) {
-      e.meleeT = 1.1;
-      if (!p.car && hurtPlayer(G, 10)) G.wasted = true;
-      else if (p.car) damageCar(G, p.car, 6);
-      G.audio.punch();
-    }
-    e.meleeT -= dt;
-    e.shootT -= dt;
-    if (d > 140 && d < 520 && e.shootT <= 0) {
-      e.shootT = 1.6 + G.random() * 1.2;
-      G.bullets.push({
-        x: e.x, y: e.y, angle: e.angle + (G.random() - 0.5) * 0.2,
-        speed: 620, from: 'enemy', damage: 9, life: 1.4,
-      });
-      G.audio.shoot();
-    }
-  }
-  // Remove dead thugs, count the kills toward the mission.
-  for (let i = G.enemies.length - 1; i >= 0; i -= 1) {
-    if (G.enemies[i].hp <= 0) {
-      G.effects.push({ kind: 'down', x: G.enemies[i].x, y: G.enemies[i].y, t: 0.7 });
-      G.enemies.splice(i, 1);
-      G.missions.killed += 1;
-      G.player.money += 20;
-    }
-  }
-  // A speeding player car that hits a pedestrian is a crime.
-  if (p.car && Math.abs(p.car.speed) > 260) {
-    for (const ped of G.peds) {
-      if (dist(ped.x, ped.y, p.car.x, p.car.y) < 40) {
-        ped.flee = 4;
-        addWanted(G, 1, 'Hit a pedestrian');
-        G.audio.crash();
-        p.car.speed *= 0.7;
+    if (e.hp <= 0) continue;
+    const d = dist(e.x, e.y, p.x, p.y);
+    const wantAngle = Math.atan2(p.y - e.y, p.x - e.x);
+    e.angle = wantAngle;
+    if (d > 60) {
+      e.x += Math.cos(wantAngle) * e.speed * dt;
+      e.y += Math.sin(wantAngle) * e.speed * dt;
+    } else if (d < 34) {
+      e.meleeT -= dt;
+      if (e.meleeT <= 0) {
+        e.meleeT = 1.1;
+        hurtPlayer(G, 9);
       }
     }
+    e.shootT -= dt;
+    if (d < 420 && d > 90 && e.shootT <= 0) {
+      e.shootT = 1.6 + G.random() * 0.8;
+      G.bullets.push({
+        x: e.x, y: e.y,
+        vx: Math.cos(wantAngle) * 520, vy: Math.sin(wantAngle) * 520,
+        dmg: 8, fromPlayer: false, t: 0,
+      });
+      if (G.audio) G.audio.noise(0.06, 0.08, 1800);
+    }
   }
-  void clamp;
+  G.enemies = G.enemies.filter((e) => e.hp > 0 || (e.deadT = (e.deadT || 0) + dt) < 1.5);
 }

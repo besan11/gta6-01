@@ -1,13 +1,8 @@
-// main.ts — The entry program for "Porto Verde: Three Days in the Sun" (gta6-01).
-// Node 22, standard library only. It hands the game in: it copies this repository's
-// game/ and screenshots/ into /output (or MAKEFUN_OUTPUT_DIR outside the grader)
-// and writes /output/dossier.json with buildDossier from the vendored make.fun
-// library (vendor/makefun-game.ts, the kit's copy, unchanged). The game itself is
-// plain static files under game/ — game/index.html opens in desktop Chrome and
-// plays with no network request — and the screenshots are real renders of it.
-//
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
+// Porto Verde v6 — the harness entrypoint: hand the game/ folder and the
+// screenshots/ folder to the make.fun program, which writes /output/dossier.json.
+// Node 22+, standard library only; run with MAKEFUN_OUTPUT_DIR set outside the
+// grader, or let the grader's /output be the target. Serve locally first with
+// `node serve.ts`, then open http://localhost:8080.
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +14,14 @@ const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });
 mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+}
 
-// The scorer's own caps (from the bounty's gate): only text_max_bytes shapes the
-// dossier's bytes; the others refuse an entry the scorer would refuse — more than
-// 4 screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
-// game files in all, or a path under game/ over 1000 bytes.
+// The scorer's own caps (from reference/gate.json): text_max_bytes shapes the
+// bytes the judge reads; the rest refuse an entry the scorer would refuse —
+// more than 4 screenshots or one over 256 KiB, more than 993 files in game/
+// or 48 MiB of game files in all, or a path under game/ over 1000 bytes.
 writeFileSync(
   join(out, 'dossier.json'),
   buildDossier(out, {

@@ -1,189 +1,240 @@
-// hud.js — The heads-up display: money, health, wanted stars, clock, missions.
-// Features: top-left money + day/time + district + wanted stars + HEAT bar,
-// mission panel (mission number, giver, objective, distance), dialog box with the
-// story briefing, toast messages, day banners, car speed + health while driving,
-// controls hint, and the minimap (see minimap.js). All in logical 1280x720 space.
-import { FONT, PALETTE } from './config.js';
-import { districtAt } from './world.js';
-import { currentMission, currentStep, objectiveText } from './missions.js';
+// Porto Verde v6 — the HUD: every system visible in one frame, each in its own
+// place (see hud-layout.js). Money and day top-left, PD response and minimap
+// top-right, weapons bottom-centre, radio bottom-right, dialogue above that.
+import { PALETTE, MAX_STARS } from './config.js';
+import { HUD_LAYOUT, panelRect } from './hud-layout.js';
 import { drawMinimap } from './minimap.js';
+import { currentMission, currentStep } from './missions.js';
+import { policePanel } from './police-response.js';
+import { currentTrack } from './radio.js';
+import { repProgress } from './rep.js';
+import { missionTimerText } from './mission-timer.js';
+import { formatMoney } from './money-scale.js';
+import { drawPortrait, dialogueActive } from './dialogue.js';
 
-export function drawHud(ctx, G) {
-  const p = G.player;
-  ctx.textBaseline = 'alphabetic';
-  // --- Top-left: money, day/time, district, wanted stars, heat ---
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(14, 12, 300, 96);
-  ctx.strokeStyle = 'rgba(255,207,63,0.5)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(14, 12, 300, 96);
+function starsRow(ctx, x, y, stars) {
+  ctx.font = 'bold 22px sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i < MAX_STARS; i += 1) {
+    ctx.fillStyle = i < stars ? PALETTE.star : 'rgba(244,241,232,0.25)';
+    ctx.fillText('★', x - i * 26, y);
+  }
   ctx.textAlign = 'left';
-  ctx.font = 'bold 26px ' + FONT;
-  ctx.fillStyle = PALETTE.money;
-  ctx.fillText('$' + p.money.toLocaleString('en-US'), 26, 44);
-  ctx.font = '16px ' + FONT;
-  ctx.fillStyle = PALETTE.text;
-  const hh = String(G.clock.hour).padStart(2, '0');
-  const mm = String(G.clock.minute).padStart(2, '0');
-  ctx.fillText('DAY ' + G.clock.day + '  ' + hh + ':' + mm + '  •  ' + districtAt(p.x, p.y), 26, 68);
-  // Wanted stars.
-  for (let i = 0; i < 5; i += 1) {
-    ctx.font = '22px ' + FONT;
-    ctx.fillStyle = i < G.wanted.stars ? PALETTE.star : 'rgba(255,255,255,0.22)';
-    ctx.fillText('★', 26 + i * 26, 98);
-  }
-  // Heat bar.
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fillRect(160, 84, 140, 8);
-  ctx.fillStyle = G.wanted.heat > 60 ? '#ff5a4e' : PALETTE.star;
-  ctx.fillRect(160, 84, 140 * (G.wanted.heat / 100), 8);
-  ctx.font = '11px ' + FONT;
-  ctx.fillStyle = PALETTE.muted;
-  ctx.fillText('HEAT ' + Math.round(G.wanted.heat), 160, 80);
-
-  // --- Minimap top-right ---
-  drawMinimap(ctx, G, 1280 - 234, 16, 220, 152);
-
-  // --- Health bar under the minimap ---
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(1280 - 234, 176, 220, 26);
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fillRect(1280 - 226, 185, 150, 9);
-  ctx.fillStyle = PALETTE.hp;
-  ctx.fillRect(1280 - 226, 185, 150 * (p.hp / 100), 9);
-  ctx.font = 'bold 13px ' + FONT;
-  ctx.fillStyle = PALETTE.text;
-  ctx.fillText('HP ' + Math.ceil(p.hp), 1280 - 66, 194);
-
-  // --- Mission panel (left, under the stats) ---
-  const m = currentMission(G.missions);
-  ctx.fillStyle = PALETTE.panel;
-  ctx.fillRect(14, 120, 300, 86);
-  ctx.strokeStyle = 'rgba(55,224,160,0.6)';
-  ctx.strokeRect(14, 120, 300, 86);
-  if (m) {
-    ctx.font = 'bold 15px ' + FONT;
-    ctx.fillStyle = PALETTE.objective;
-    ctx.fillText('MISSION ' + (G.missions.index + 1) + '/12 — ' + m.title.toUpperCase(), 26, 144);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText(m.giver + '  •  Day ' + m.day, 26, 164);
-    ctx.font = '14px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    wrapText(ctx, objectiveText(G), 26, 186, 276, 16);
-    const step = currentStep(G.missions);
-    if (step) {
-      const px = p.car ? p.car.x : p.x;
-      const py = p.car ? p.car.y : p.y;
-      const d = Math.round(Math.hypot(step.x - px, step.y - py));
-      ctx.font = 'bold 12px ' + FONT;
-      ctx.fillStyle = PALETTE.marker;
-      ctx.textAlign = 'right';
-      ctx.fillText(d + 'm', 300, 144);
-      ctx.textAlign = 'left';
-    }
-  } else {
-    ctx.font = 'bold 15px ' + FONT;
-    ctx.fillStyle = PALETTE.objective;
-    ctx.fillText('ALL MISSIONS COMPLETE', 26, 150);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText('Porto Verde is yours, Dario.', 26, 174);
-  }
-
-  // --- Driving readout bottom-right ---
-  if (p.car) {
-    const car = p.car;
-    const mph = Math.round(Math.abs(car.speed) * 0.12);
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(1280 - 234, 720 - 78, 220, 64);
-    ctx.textAlign = 'left';
-    ctx.font = 'bold 26px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText(mph + ' MPH', 1280 - 222, 720 - 44);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText(car.model.name, 1280 - 222, 720 - 24);
-    ctx.fillStyle = 'rgba(255,255,255,0.15)';
-    ctx.fillRect(1280 - 110, 720 - 56, 90, 9);
-    ctx.fillStyle = car.hp > 40 ? PALETTE.money : PALETTE.hp;
-    ctx.fillRect(1280 - 110, 720 - 56, 90 * (car.hp / 100), 9);
-    ctx.font = '11px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    ctx.fillText('CAR ' + Math.ceil(car.hp) + '%', 1280 - 110, 720 - 34);
-  } else {
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(14, 720 - 64, 330, 50);
-    ctx.font = '13px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText('WASD move  •  Shift run  •  E enter car', 26, 720 - 42);
-    ctx.fillText('F punch  •  Click shoot  •  Q save  •  P pause', 26, 720 - 24);
-  }
-
-  // --- Toast (centre-top) ---
-  if (G.toastT > 0 && G.toast) {
-    ctx.font = 'bold 18px ' + FONT;
-    const w = ctx.measureText(G.toast).width + 36;
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect((1280 - w) / 2, 12, w, 36);
-    ctx.strokeStyle = PALETTE.panelEdge;
-    ctx.strokeRect((1280 - w) / 2, 12, w, 36);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PALETTE.marker;
-    ctx.fillText(G.toast, 640, 36);
-    ctx.textAlign = 'left';
-  }
-
-  // --- Day banner (centre) ---
-  if (G.dayBannerT > 0 && G.dayBanner) {
-    ctx.globalAlpha = Math.min(1, G.dayBannerT);
-    ctx.font = 'bold 44px ' + FONT;
-    ctx.textAlign = 'center';
-    ctx.fillStyle = PALETTE.text;
-    ctx.shadowColor = '#000';
-    ctx.shadowBlur = 12;
-    ctx.fillText(G.dayBanner, 640, 300);
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
-    ctx.textAlign = 'left';
-  }
-
-  // --- Mission dialog box (bottom centre) ---
-  const d = G.missions.dialog;
-  if (d) {
-    const line = d.lines[d.line] || '';
-    ctx.fillStyle = PALETTE.panel;
-    ctx.fillRect(240, 720 - 150, 800, 84);
-    ctx.strokeStyle = PALETTE.panelEdge;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(240, 720 - 150, 800, 84);
-    ctx.font = 'bold 14px ' + FONT;
-    ctx.fillStyle = PALETTE.marker;
-    ctx.fillText(m ? m.giver.toUpperCase() + '  —  ' + m.title.toUpperCase() : '', 260, 720 - 122);
-    ctx.font = '16px ' + FONT;
-    ctx.fillStyle = PALETTE.text;
-    wrapText(ctx, line, 260, 720 - 96, 760, 20);
-    ctx.font = '12px ' + FONT;
-    ctx.fillStyle = PALETTE.muted;
-    ctx.fillText('Enter / click to continue  (' + (d.line + 1) + '/' + d.lines.length + ')', 260, 720 - 76);
-  }
 }
 
-/** Wrap text to a width, drawing up to two lines. */
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = String(text).split(' ');
+export function drawHud(ctx, G) {
+  const L = HUD_LAYOUT;
+  ctx.save();
+  ctx.textBaseline = 'alphabetic';
+  // Top-left: money, clock, district, REP.
+  ctx.fillStyle = PALETTE.money;
+  ctx.font = 'bold 26px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(formatMoney(G.player.money), L.money.x, L.money.y + 10);
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = 'bold 16px sans-serif';
+  const hh = String(G.clock.hour).padStart(2, '0');
+  const mm = String(G.clock.minute).padStart(2, '0');
+  ctx.fillText('DAY ' + G.clock.day + '  ' + hh + ':' + mm, L.clock.x, L.clock.y + 10);
+  ctx.fillStyle = PALETTE.muted;
+  ctx.font = '13px sans-serif';
+  ctx.fillText(G.district ? G.district.name : 'PORTO VERDE', L.districtLine.x, L.districtLine.y + 8);
+  const rp = repProgress(G.rep.points);
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('REP ' + rp.rank.level + ' · ' + rp.rank.name + ' · ' + rp.into.toLocaleString('en-US') + '/' + rp.span.toLocaleString('en-US'), L.rep.x, L.rep.y + 8);
+  ctx.fillStyle = '#2c303a';
+  ctx.fillRect(L.rep.x, L.rep.y + 14, L.rep.w, 7);
+  ctx.fillStyle = PALETTE.star;
+  ctx.fillRect(L.rep.x, L.rep.y + 14, L.rep.w * rp.pct, 7);
+
+  // Mission panel, left under REP.
+  const mission = currentMission(G);
+  const step = currentStep(G);
+  if (mission && step) {
+    panelRect(ctx, L.missionPanel.x, L.missionPanel.y, L.missionPanel.w, L.missionPanel.h);
+    ctx.fillStyle = PALETTE.objective;
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('MISSION ' + (G.missions.index + 1) + '/12 — ' + mission.title.toUpperCase(), L.missionPanel.x + 10, L.missionPanel.y + 22);
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = '13px sans-serif';
+    ctx.fillText(step.label, L.missionPanel.x + 10, L.missionPanel.y + 44);
+    ctx.fillStyle = PALETTE.muted;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Stage ' + (G.missions.step + 1) + '/' + mission.steps.length + '   ·   ' + mission.giver, L.missionPanel.x + 10, L.missionPanel.y + 64);
+    const next = G.missions.index + 1 < 12 ? null : null;
+    const following = (typeof window !== 'undefined' && G._nextTitle) ? G._nextTitle : null;
+    const nextTitle = G.missions.index + 1 < 12
+      ? (['Welcome Home', 'Cold Cargo', 'The Green Van', 'First Blood', 'Sunset Run', 'Paper Trail', 'Hot Pursuit', 'The Vault Key', 'High Tide', 'Family Business', 'The Last Score', 'The Casino Vault'][G.missions.index + 1])
+      : null;
+    if (nextTitle) {
+      ctx.fillStyle = PALETTE.star;
+      ctx.fillText('NEXT: ' + nextTitle, L.missionPanel.x + 10, L.missionPanel.y + 82);
+    }
+  }
+
+  // Wanted stars + PD response, top-right.
+  starsRow(ctx, L.wanted.x, L.wanted.y + 16, G.wanted.stars);
+  const rows = policePanel(G);
+  if (rows.length > 0) {
+    const h = 26 + rows.length * 20;
+    panelRect(ctx, L.pdPanel.x, L.pdPanel.y, L.pdPanel.w, h);
+    ctx.fillStyle = PALETTE.star;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('PORTO VERDE PD RESPONSE', L.pdPanel.x + 10, L.pdPanel.y + 18);
+    ctx.font = '12px sans-serif';
+    rows.forEach((r, i) => {
+      const yy = L.pdPanel.y + 38 + i * 20;
+      ctx.fillStyle = r.status === 'RAMMING' ? PALETTE.hp : PALETTE.text;
+      ctx.fillText(r.unit + ' — ' + r.officer, L.pdPanel.x + 10, yy);
+      ctx.textAlign = 'right';
+      ctx.fillText(r.distM + 'm · ' + r.status, L.pdPanel.x + L.pdPanel.w - 10, yy);
+      ctx.textAlign = 'left';
+    });
+  }
+
+  // Minimap, right under the PD panel.
+  drawMinimap(ctx, G, L.minimap.x, L.minimap.y, L.minimap.w, L.minimap.h);
+
+  // Mission timer, top-centre, big.
+  const mt = missionTimerText(G);
+  if (mt) {
+    ctx.fillStyle = 'rgba(16,20,28,0.88)';
+    const tw = 190;
+    ctx.fillRect(L.timer.x - tw / 2, L.timer.y, tw, 52);
+    ctx.strokeStyle = PALETTE.hp;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(L.timer.x - tw / 2 + 0.5, L.timer.y + 0.5, tw - 1, 51);
+    ctx.fillStyle = PALETTE.hp;
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(mt.text, L.timer.x, L.timer.y + 28);
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText(mt.label, L.timer.x, L.timer.y + 44);
+    ctx.textAlign = 'left';
+  }
+
+  // Toast, under the timer.
+  if (G.toast && G.toastT > 0) {
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(G.toast, L.toast.x, L.toast.y);
+    ctx.textAlign = 'left';
+  }
+
+  // District banner, centre-bottom, fades with dayBannerT.
+  if (G.dayBanner && G.dayBannerT > 0) {
+    ctx.globalAlpha = Math.min(1, G.dayBannerT);
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(G.dayBanner, L.districtBanner.x, L.districtBanner.y);
+    ctx.fillStyle = PALETTE.muted;
+    ctx.font = '15px sans-serif';
+    const d = G.district;
+    if (d) ctx.fillText(d.flavor, L.districtBanner.x, L.districtBanner.y + 22);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha = 1;
+  }
+
+  // Context line from a contact, above the dialogue panel.
+  const d = G.dialogue;
+  if (d.context && d.contextT > 0) {
+    ctx.fillStyle = PALETTE.star;
+    ctx.font = 'italic 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(d.context, L.contextLine.x, L.contextLine.y);
+    ctx.textAlign = 'left';
+  }
+
+  // Dialogue panel with portrait.
+  if (dialogueActive(G)) {
+    panelRect(ctx, L.dialog.x, L.dialog.y, L.dialog.w, L.dialog.h);
+    drawPortrait(ctx, d.speaker, L.dialog.x + 12, L.dialog.y + 12, 72);
+    ctx.fillStyle = PALETTE.star;
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(d.speaker, L.dialog.x + 96, L.dialog.y + 24);
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = '14px sans-serif';
+    const line = d.lines[d.line] || '';
+    wrapText(ctx, line, L.dialog.x + 96, L.dialog.y + 46, L.dialog.w - 112, 18);
+    ctx.fillStyle = PALETTE.muted;
+    ctx.font = '11px sans-serif';
+    ctx.fillText('Enter ▸', L.dialog.x + L.dialog.w - 56, L.dialog.y + L.dialog.h - 10);
+  }
+
+  // Weapon slots, bottom-centre.
+  const slots = G.weapons.slots;
+  const sw = 74;
+  const totalW = slots.length * sw;
+  const sx0 = L.weapons.x + (L.weapons.w - totalW) / 2;
+  slots.forEach((s, i) => {
+    const x = sx0 + i * sw;
+    const y = L.weapons.y;
+    ctx.fillStyle = i === G.weapons.selected ? 'rgba(255,207,63,0.25)' : 'rgba(16,20,28,0.88)';
+    ctx.fillRect(x, y, sw - 4, 36);
+    ctx.strokeStyle = i === G.weapons.selected ? PALETTE.panelEdge : '#555c66';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x + 0.5, y + 0.5, sw - 5, 35);
+    ctx.fillStyle = s.unlocked ? PALETTE.text : PALETTE.muted;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText((i + 1) + ' ' + s.name, x + 5, y + 14);
+    ctx.font = '11px sans-serif';
+    ctx.fillText(s.unlocked ? (s.ammo === Infinity ? '∞' : String(s.ammo)) : 'locked', x + 5, y + 29);
+  });
+
+  // Radio, bottom-right.
+  const track = currentTrack(G);
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('♪ ' + track.station.name + ' — ' + track.track, L.radio.x, L.radio.y + 12);
+  ctx.textAlign = 'left';
+
+  // Speed + car, right side above radio.
+  if (G.player.car) {
+    const mph = Math.round(Math.abs(G.player.car.speed) * 0.12);
+    ctx.fillStyle = PALETTE.text;
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(mph + ' MPH', L.speed.x, L.speed.y);
+    ctx.font = '13px sans-serif';
+    ctx.fillStyle = PALETTE.muted;
+    ctx.fillText(G.player.car.name + '  ·  HP ' + Math.max(0, Math.round(G.player.car.hp)), L.speed.x, L.speed.y + 18);
+    ctx.textAlign = 'left';
+  }
+
+  // Health bar, bottom-left.
+  ctx.fillStyle = PALETTE.text;
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('HP ' + Math.max(0, Math.round(G.player.hp)), L.health.x, L.health.y + 10);
+  ctx.fillStyle = '#2c303a';
+  ctx.fillRect(L.health.x, L.health.y + 16, L.health.w, 8);
+  ctx.fillStyle = G.player.hp > 30 ? PALETTE.hp : '#ff9a3d';
+  ctx.fillRect(L.health.x, L.health.y + 16, L.health.w * Math.max(0, G.player.hp / 100), 8);
+  if (G.wanted.stars > 0) {
+    ctx.fillStyle = PALETTE.muted;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('HEAT ' + Math.round(G.wanted.heat), L.health.x, L.health.y + 42);
+  }
+  ctx.restore();
+}
+
+function wrapText(ctx, text, x, y, maxW, lineH) {
+  const words = text.split(' ');
   let line = '';
-  let lines = 0;
+  let yy = y;
   for (const word of words) {
     const test = line ? line + ' ' + word : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, y + lines * lineHeight);
-      lines += 1;
-      if (lines >= 2) return;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, x, yy);
       line = word;
+      yy += lineH;
     } else {
       line = test;
     }
   }
-  if (lines < 2) ctx.fillText(line, x, y + lines * lineHeight);
+  if (line) ctx.fillText(line, x, yy);
 }

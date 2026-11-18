@@ -1,376 +1,304 @@
-// missions.js — The story of Porto Verde: 12 missions across 3 days.
-// Features: a chained mission story (Dario Cruz returns home, works for Mara Solis,
-// and earns his way out in three days), mission briefings with dialogue, six
-// objective types (go to, drive to, collect, fight, chase, escape/defend), cash
-// rewards, day progression, and a mission-complete fanfare. Original characters,
-// original places, original story — nothing from any commercial game.
-import { MISSION_REWARDS } from './config.js';
+// Porto Verde v6 — twelve missions over three days in the sun. Dario comes home,
+// Mara hands him work, Kessler's crew pushes back, and the last night ends in
+// the Casino Verde vault. Mission 12 is the heist: clear the guards, take the
+// bags, and fly out of Porto Verde before the whole city arrives.
+import { MISSION_REWARDS, ROADS_X, ROADS_Y } from './config.js';
 import { dist } from './random.js';
-import { collideBuildings } from './world.js';
-
-// Landmark coordinates (same map as world.js LANDMARKS), snapped to roads, parks,
-// the beach and the runway — never inside a building block, so every objective
-// is actually reachable on foot or by car.
-const MARINA_CAFE = { x: 500, y: 420 };
-const HARBOR = { x: 640, y: 1900 };
-const GARAGE = { x: 1700, y: 880 };
-const DOCKSIDE = { x: 900, y: 1680 };
-const VIEWPOINT = { x: 2900, y: 420 };
-const PLAZA = { x: 1500, y: 1300 };
-const CASINO = { x: 2500, y: 1250 };
-const AIRSTRIP = { x: 2750, y: 2005 };
-const CITY_HALL = { x: 1300, y: 950 };
-const PIER = { x: 300, y: 1100 };
+import { collideBuildings, isOpenGround } from './world.js';
+import { addWanted } from './wanted.js';
+import { openDialogue } from './dialogue.js';
+import { addRep } from './rep.js';
 
 export const MISSIONS = [
-  {
-    day: 1, title: 'Welcome Home', giver: 'Mara Solis',
-    brief: [
-      'MARA: Dario! Three years away and you walk in like the tide owes you money.',
-      'DARIO: The tide owes me nothing. You do, though — a job, remember?',
-      'MARA: One job. Then we talk about the old days. Meet me at the Marina Cafe.',
-    ],
-    steps: [{ type: 'goto', x: MARINA_CAFE.x, y: MARINA_CAFE.y, r: 70, label: 'Meet Mara at the Marina Cafe' }],
-  },
-  {
-    day: 1, title: 'Cold Cargo', giver: 'Mara Solis',
-    brief: [
-      'MARA: A refrigerated van is waiting at the pier. It has to reach the harbor warehouse before noon.',
-      'MARA: Drive it like your mother is in the back. No police, no scratches.',
-      'DARIO: Mothers, police, scratches. Got it.',
-    ],
-    steps: [{ type: 'drive', x: HARBOR.x, y: HARBOR.y, r: 90, label: 'Drive the van to the Harbor Warehouse' }],
-  },
-  {
-    day: 1, title: 'The Green Van', giver: 'Tito Ramos',
-    brief: [
-      'TITO: Mara needs a van, and the city has plenty. Borrow one. Permanently.',
-      'TITO: There is a green Marina Van parked by the plaza. Bring it to my garage.',
-      'DARIO: Borrow. Right. I love this city already.',
-    ],
-    steps: [
-      { type: 'goto', x: PLAZA.x, y: PLAZA.y, r: 120, label: 'Find the green Marina Van at Central Plaza' },
-      { type: 'drive', x: GARAGE.x, y: GARAGE.y, r: 90, label: 'Deliver the van to Verde Garage' },
-    ],
-  },
-  {
-    day: 1, title: 'First Blood', giver: 'Mara Solis',
-    brief: [
-      'MARA: The dock crew that works for Kessler is shaking down my bar tonight.',
-      'MARA: Go to the Dockside Bar and remind them whose street that is.',
-      'DARIO: Fists or louder? ... Fists first. Louder if they insist.',
-    ],
-    steps: [{ type: 'fight', x: DOCKSIDE.x, y: DOCKSIDE.y, r: 160, count: 3, label: 'Deal with the dock thugs at the Dockside Bar' }],
-  },
-  {
-    day: 2, title: 'Sunset Run', giver: 'Lena Voss',
-    brief: [
-      'LENA: I am a singer, darling, and my taxi never showed. Drive me to the Mirador Viewpoint.',
-      'LENA: The show starts at sunset. If I am late, the whole city hears about it.',
-      'DARIO: Then we had better not be late.',
-    ],
-    steps: [
-      { type: 'goto', x: CITY_HALL.x, y: CITY_HALL.y, r: 80, label: 'Pick up Lena at City Hall' },
-      { type: 'drive', x: VIEWPOINT.x, y: VIEWPOINT.y, r: 90, label: 'Drive Lena to the Mirador Viewpoint' },
-    ],
-  },
-  {
-    day: 2, title: 'Paper Trail', giver: 'Mara Solis',
-    brief: [
-      'MARA: Three envelopes. Three corners of the city. Nobody opens them, nobody follows you.',
-      'MARA: Plaza, pier, casino strip. In that order, if you can manage it.',
-      'DARIO: Envelopes. My favourite kind of treasure hunt.',
-    ],
-    steps: [{
-      type: 'collect', count: 3, label: 'Collect the three envelopes',
-      pts: [{ x: PLAZA.x, y: PLAZA.y }, { x: PIER.x + 60, y: PIER.y }, { x: 2100, y: 800 }],
-    }],
-  },
-  {
-    day: 2, title: 'Hot Pursuit', giver: 'Tito Ramos',
-    brief: [
-      'TITO: The job went loud, Dario. The police are coming, and you are holding the bag.',
-      'TITO: Lose them. Get to the garage and stay out of sight until the heat dies.',
-      'DARIO: Losing police. That is practically my middle name.',
-    ],
-    steps: [{ type: 'escape', x: GARAGE.x, y: GARAGE.y, r: 100, label: 'Escape the police and reach Verde Garage' }],
-  },
-  {
-    day: 2, title: 'The Vault Key', giver: 'Mara Solis',
-    brief: [
-      'MARA: Kessler keeps the casino vault key in his office above the strip.',
-      'MARA: His guards are not friendly. Take the keycard and walk out like you own the place.',
-      'DARIO: I do own the place. As of tonight, anyway.',
-    ],
-    steps: [
-      { type: 'fight', x: CASINO.x, y: CASINO.y, r: 170, count: 2, label: 'Get past the casino guards' },
-      { type: 'collect', count: 1, label: 'Take the vault keycard', pts: [{ x: 2500, y: 1190 }] },
-    ],
-  },
-  {
-    day: 3, title: 'High Tide', giver: 'Lena Voss',
-    brief: [
-      'LENA: Kessler sent a courier with my contract — he wants me gone from the city.',
-      'LENA: The courier is driving a white sedan down the Casino Strip right now.',
-      'DARIO: Then I had better catch him before the tide does.',
-    ],
-    steps: [{ type: 'chase', x: 2100, y: 900, r: 200, label: 'Chase down the courier on the Casino Strip' }],
-  },
-  {
-    day: 3, title: 'Family Business', giver: 'Mara Solis',
-    brief: [
-      'MARA: Kessler is sending his crew to burn my cafe tonight. My cafe, Dario.',
-      'MARA: Hold the street until they give up. Nobody touches the Marina Cafe.',
-      'DARIO: Nobody touches it. That is a promise.',
-    ],
-    steps: [{ type: 'defend', x: MARINA_CAFE.x, y: MARINA_CAFE.y, r: 170, seconds: 45, label: 'Defend the Marina Cafe for 45 seconds' }],
-  },
-  {
-    day: 3, title: 'The Last Score', giver: 'Mara Solis',
-    brief: [
-      'MARA: Tonight we take the casino vault. The keycard, the crew, the plan — all ready.',
-      'MARA: Grab the cash bags inside and get out before the alarms bring the whole city.',
-      'DARIO: One last score. Then Porto Verde is ours again.',
-    ],
-    steps: [
-      { type: 'collect', count: 3, label: 'Grab the three cash bags in the casino', pts: [{ x: 2500, y: 1100 }, { x: 2500, y: 1400 }, { x: 2100, y: 1250 }] },
-      { type: 'escape', x: PIER.x + 80, y: PIER.y, r: 100, label: 'Escape to the Sunset Pier' },
-    ],
-  },
-  {
-    day: 3, title: 'Three Days in the Sun', giver: 'Mara Solis',
-    brief: [
-      'MARA: The airstrip. One plane, one pilot who owes me a favour, and the whole city behind us.',
-      'MARA: Drive, Dario. Do not stop for anything. Not for Kessler, not for the police, not for the sunset.',
-      'DARIO: Three days in Porto Verde. I would not trade them for anything.',
-    ],
-    steps: [{ type: 'drive', x: AIRSTRIP.x, y: AIRSTRIP.y, r: 110, label: 'Drive to the Airstrip and fly out of Porto Verde' }],
-  },
+  { day: 1, title: 'Welcome Home', giver: 'Mara Solis', brief: [
+    'MARA: Dario! Three years away and you walk in like the tide owes you money.',
+    'DARIO: The tide owes me nothing. You do, though — a job, remember?',
+    'MARA: One job. Then we talk about the old days. Meet me at the Marina Cafe.',
+  ], steps: [{ type: 'goto', x: 500, y: 420, r: 70, label: 'Meet Mara at the Marina Cafe' }] },
+  { day: 1, title: 'Cold Cargo', giver: 'Mara Solis', brief: [
+    'MARA: A refrigerated van is waiting at the pier. It has to reach the harbor warehouse before noon.',
+    'MARA: Drive it like your mother is in the back. No police, no scratches.',
+    'DARIO: Mothers, police, scratches. Got it.',
+  ], steps: [{ type: 'drive', x: 640, y: 1900, r: 90, label: 'Drive the van to the Harbor Warehouse' }] },
+  { day: 1, title: 'The Green Van', giver: 'Tito Ramos', brief: [
+    'TITO: Mara needs a van, and the city has plenty. Borrow one. Permanently.',
+    'TITO: There is a green Marina Van parked by the plaza. Bring it to my garage.',
+    'DARIO: Borrow. Right. I love this city already.',
+  ], steps: [
+    { type: 'goto', x: 1500, y: 1300, r: 120, label: 'Find the green Marina Van at Central Plaza' },
+    { type: 'drive', x: 1700, y: 880, r: 90, label: 'Deliver the van to Verde Garage' },
+  ] },
+  { day: 1, title: 'First Blood', giver: 'Mara Solis', brief: [
+    'MARA: The dock crew that works for Kessler is shaking down my bar tonight.',
+    'MARA: Go to the Dockside Bar and remind them whose street that is.',
+    'DARIO: Fists or louder? ... Fists first. Louder if they insist.',
+  ], steps: [{ type: 'fight', x: 900, y: 1680, r: 160, count: 3, label: 'Deal with the dock thugs at the Dockside Bar' }] },
+  { day: 2, title: 'Sunset Run', giver: 'Lena Voss', timer: 150, brief: [
+    'LENA: I am a singer, darling, and my taxi never showed. Drive me to the Mirador Viewpoint.',
+    'LENA: The show starts at sunset. If I am late, the whole city hears about it.',
+    'DARIO: Then we had better not be late.',
+  ], steps: [
+    { type: 'goto', x: 1300, y: 950, r: 80, label: 'Pick up Lena at City Hall' },
+    { type: 'drive', x: 2900, y: 420, r: 90, label: 'Drive Lena to the Mirador Viewpoint' },
+  ] },
+  { day: 2, title: 'Paper Trail', giver: 'Mara Solis', brief: [
+    'MARA: Three envelopes. Three corners of the city. Nobody opens them, nobody follows you.',
+    'MARA: Plaza, pier, casino strip. In that order, if you can manage it.',
+    'DARIO: Envelopes. My favourite kind of treasure hunt.',
+  ], steps: [{ type: 'collect', count: 3, label: 'Collect the three envelopes', pts: [{ x: 1500, y: 1300 }, { x: 360, y: 1100 }, { x: 2100, y: 800 }] }] },
+  { day: 2, title: 'Hot Pursuit', giver: 'Tito Ramos', brief: [
+    'TITO: The job went loud, Dario. The police are coming, and you are holding the bag.',
+    'TITO: Lose them. Get to the garage and stay out of sight until the heat dies.',
+    'DARIO: Losing police. That is practically my middle name.',
+  ], steps: [{ type: 'escape', x: 1700, y: 880, r: 100, label: 'Escape the police and reach Verde Garage' }] },
+  { day: 2, title: 'The Vault Key', giver: 'Mara Solis', brief: [
+    'MARA: Kessler keeps the casino vault key in his office above the strip.',
+    'MARA: His guards are not friendly. Take the keycard and walk out like you own the place.',
+    'DARIO: I do own the place. As of tonight, anyway.',
+  ], steps: [
+    { type: 'fight', x: 2500, y: 1250, r: 170, count: 2, label: 'Get past the casino guards' },
+    { type: 'collect', count: 1, label: 'Take the vault keycard', pts: [{ x: 2500, y: 1190 }] },
+  ] },
+  { day: 3, title: 'High Tide', giver: 'Lena Voss', brief: [
+    'LENA: Kessler sent a courier with my contract — he wants me gone from the city.',
+    'LENA: The courier is driving a white sedan down the Casino Strip right now.',
+    'DARIO: Then I had better catch him before the tide does.',
+  ], steps: [{ type: 'chase', x: 2100, y: 900, r: 200, label: 'Chase down the courier on the Casino Strip' }] },
+  { day: 3, title: 'Family Business', giver: 'Mara Solis', brief: [
+    'MARA: Kessler is sending his crew to burn my cafe tonight. My cafe, Dario.',
+    'MARA: Hold the street until they give up. Nobody touches the Marina Cafe.',
+    'DARIO: Nobody touches it. That is a promise.',
+  ], steps: [{ type: 'defend', x: 500, y: 420, r: 170, seconds: 45, label: 'Defend the Marina Cafe for 45 seconds' }] },
+  { day: 3, title: 'The Last Score', giver: 'Mara Solis', brief: [
+    'MARA: Tonight we take the casino vault. The keycard, the crew, the plan — all ready.',
+    'MARA: Grab the cash bags inside and get out before the alarms bring the whole city.',
+    'DARIO: One last score. Then Porto Verde is ours again.',
+  ], steps: [
+    { type: 'collect', count: 3, label: 'Grab the three cash bags in the casino', pts: [{ x: 2500, y: 1100 }, { x: 2500, y: 1400 }, { x: 2100, y: 1250 }] },
+    { type: 'escape', x: 380, y: 1100, r: 100, label: 'Escape to the Sunset Pier' },
+  ] },
+  { day: 3, title: 'The Casino Vault', giver: 'Mara Solis', brief: [
+    'MARA: The vault, Dario. Kessler keeps everything he stole from this city behind one steel door.',
+    'MARA: His guards will not step aside. The bags are inside — take them all, and do not stop running.',
+    'DARIO: Three days in Porto Verde. I would not trade them for anything.',
+  ], steps: [
+    { type: 'fight', x: 2500, y: 1250, r: 170, count: 3, label: 'Clear the vault guards on the casino floor' },
+    { type: 'collect', count: 3, label: 'Take the three vault bags', pts: [{ x: 2440, y: 1120 }, { x: 2500, y: 1160 }, { x: 2560, y: 1120 }] },
+    { type: 'drive', x: 2750, y: 2005, r: 110, label: 'Escape to the Airstrip and fly out of Porto Verde' },
+  ] },
 ];
 
-/** Create the mission tracker: mission 0, step 0, briefing dialog open. */
 export function createMissions() {
   return {
-    index: 0,
-    step: 0,
-    done: false,
-    dialog: null, // {lines, line}
-    dialogT: 0,
-    pickups: [],
-    spawned: 0,
-    killed: 0,
-    timer: 0,
-    chaseCar: null,
-    layLow: 0,
-    completedCount: 0,
+    index: 0, step: 0, done: false, dialog: null, dialogT: 0,
+    pickups: [], spawned: 0, killed: 0, timer: 0, chaseCar: null,
+    layLow: 0, completedCount: 0, chaseHoldT: 0, defendLeft: 0, missionT: 0,
   };
 }
 
-export function currentMission(M) {
-  return MISSIONS[M.index] || null;
+export function currentMission(G) {
+  return MISSIONS[G.missions.index] || null;
 }
 
-export function currentStep(M) {
-  const m = currentMission(M);
-  return m ? m.steps[M.step] : null;
+export function currentStep(G) {
+  const m = currentMission(G);
+  return m ? m.steps[G.missions.step] : null;
 }
 
-/** Open the briefing dialog for the current mission. */
 export function openBriefing(G) {
-  const m = currentMission(G.missions);
+  const m = currentMission(G);
   if (!m) return;
+  openDialogue(G, m.giver, m.brief);
   G.missions.dialog = { lines: m.brief, line: 0 };
-  G.missions.dialogT = 0;
-  G.audio.click();
+  if (m.timer) {
+    G.missionTimer.remaining = m.timer;
+    G.missionTimer.label = 'SUNSET';
+    G.missionTimer.active = true;
+  }
+  if (G.missions.index === 11 && G.wanted.stars < 3) {
+    G.wanted.stars = 3;
+    G.wanted.heat = 80;
+    if (G.audio) G.audio.setSiren(true);
+  }
 }
 
-/** Spawn the pickups for a collect step. */
-function spawnPickups(G, step) {
-  G.missions.pickups = step.pts.map((p) => ({ x: p.x, y: p.y, taken: false }));
+export function advanceDialog(G) {
+  const m = G.missions;
+  if (!m.dialog) return;
+  m.dialog.line += 1;
+  if (m.dialog.line >= m.dialog.lines.length) m.dialog = null;
 }
 
-/** Spawn thugs near a point for a fight/defend step. */
-function spawnThugs(G, x, y, count) {
-  for (let i = 0; i < count; i += 1) {
+function spawnThugAt(G, cx, cy) {
+  let x = cx;
+  let y = cy;
+  for (let tries = 0; tries < 8; tries += 1) {
     const a = G.random() * Math.PI * 2;
     const d = 120 + G.random() * 120;
-    // Never spawn inside a building: nudge the thug out onto the street.
-    const placed = collideBuildings(G.city.buildings, x + Math.cos(a) * d, y + Math.sin(a) * d, 14);
-    G.enemies.push({
-      x: placed.x, y: placed.y,
-      hp: 60, angle: 0, speed: 150, shootT: 1 + G.random(),
-      meleeT: 0, name: 'Kessler thug',
-    });
+    let tx = cx + Math.cos(a) * d;
+    let ty = cy + Math.sin(a) * d;
+    const fixed = collideBuildings(G.city.buildings, tx, ty, 26);
+    tx = fixed.x; ty = fixed.y;
+    if (isOpenGround(G.city.buildings, tx, ty, 26)) { x = tx; y = ty; break; }
+    if (tries === 7) {
+      let bestX = ROADS_X[0];
+      let bestD = 1e9;
+      for (const rx of ROADS_X) { const dd = Math.abs(rx - cx); if (dd < bestD) { bestD = dd; bestX = rx; } }
+      let bestY = ROADS_Y[0];
+      bestD = 1e9;
+      for (const ry of ROADS_Y) { const dd = Math.abs(ry - cy); if (dd < bestD) { bestD = dd; bestY = ry; } }
+      x = bestX; y = bestY;
+    }
   }
-  G.missions.spawned += count;
+  const thug = {
+    x, y, hp: 60, angle: 0, speed: 150,
+    shootT: 1 + G.random() * 1.5, meleeT: 0, name: 'Kessler thug',
+  };
+  G.enemies.push(thug);
+  return thug;
 }
 
-/** Prepare the current step (spawn pickups, thugs, or the chase car). */
 export function prepareStep(G) {
-  const M = G.missions;
-  const step = currentStep(M);
+  const m = G.missions;
+  const step = currentStep(G);
   if (!step) return;
-  M.pickups = [];
-  M.killed = 0;
-  M.timer = 0;
-  M.layLow = 0;
-  if (step.type === 'collect') spawnPickups(G, step);
-  if (step.type === 'fight') spawnThugs(G, step.x, step.y, step.count);
-  if (step.type === 'defend') spawnThugs(G, step.x, step.y, 3);
-  if (step.type === 'chase') {
-    const car = G.traffic.find((c) => !c.wrecked) || null;
-    if (car) {
-      car.driver = 'chase';
-      car.model = { name: 'Courier Sedan', color: '#f2f2f2', topSpeed: 500, accel: 450 };
-      car.color = '#f2f2f2';
-      car.hp = 120;
-      car.x = step.x;
-      car.y = step.y;
-      car.angle = 0;
-      car.speed = 200;
-      M.chaseCar = car;
+  m.pickups = [];
+  m.killed = 0;
+  m.chaseHoldT = 0;
+  m.layLow = 0;
+  if (step.type === 'collect') {
+    for (const pt of step.pts || []) m.pickups.push({ x: pt.x, y: pt.y, taken: false });
+  } else if (step.type === 'fight') {
+    for (let i = 0; i < (step.count || 1); i += 1) spawnThugAt(G, step.x, step.y);
+    m.spawned = step.count || 1;
+  } else if (step.type === 'defend') {
+    m.defendLeft = step.seconds || 45;
+    for (let i = 0; i < 3; i += 1) spawnThugAt(G, step.x, step.y);
+    m.spawned = 3;
+    G.missionTimer.remaining = step.seconds || 45;
+    G.missionTimer.label = 'DEFEND';
+    G.missionTimer.active = true;
+  } else if (step.type === 'chase') {
+    let car = null;
+    for (const t of G.traffic) {
+      if (!t.wrecked) { car = t; break; }
     }
+    if (car) {
+      car.name = 'Courier Sedan';
+      car.model = { name: 'Courier Sedan', color: '#f4f1e8', top: 500, accel: 450 };
+      car.hp = 120;
+      car.x = step.x; car.y = step.y;
+      car.speed = 200;
+      m.chaseCar = car;
+    }
+  } else if (step.type === 'escape') {
+    const need = G.missions.index === 10 ? 3 : 2;
+    if (G.wanted.stars < need) {
+      G.wanted.stars = need;
+      G.wanted.heat = need === 3 ? 80 : 60;
+      if (G.audio) G.audio.setSiren(true);
+    }
+    G.missionTimer.label = 'ALARM';
+    G.missionTimer.active = true;
+    G.missionTimer.remaining = 0;
+  }
+}
+
+function stepDone(G, step, dt) {
+  const m = G.missions;
+  const p = G.player;
+  const d = dist(p.x, p.y, step.x, step.y);
+  if (step.type === 'goto' || step.type === 'drive') return d < step.r;
+  if (step.type === 'collect') {
+    for (const pk of m.pickups) {
+      if (!pk.taken && dist(p.x, p.y, pk.x, pk.y) < 30) pk.taken = true;
+    }
+    return m.pickups.length > 0 && m.pickups.every((pk) => pk.taken);
+  }
+  if (step.type === 'fight') return m.killed >= (step.count || 1);
+  if (step.type === 'chase') {
+    const c = m.chaseCar;
+    if (!c) return false;
+    if (c.wrecked || c.hp <= 0) return true;
+    if (dist(p.x, p.y, c.x, c.y) < 60) {
+      m.chaseHoldT += dt;
+      return m.chaseHoldT > 1;
+    }
+    m.chaseHoldT = 0;
+    return false;
   }
   if (step.type === 'escape') {
-    // The job went loud: the police are already coming.
-    if (G.wanted.stars < 2) {
-      G.wanted.stars = 2;
-      G.wanted.heat = 60;
-      G.wanted.lastCrime = G.time;
-      G.audio.setSiren(true);
-    }
+    if (d < step.r && G.wanted.stars === 0) return true;
+    if (d < step.r && G.wanted.stars > 0) m.layLow += dt;
+    return false;
   }
+  if (step.type === 'defend') {
+    if (d < step.r) {
+      m.defendLeft -= dt;
+      if (m.defendLeft <= 0) return true;
+      if (G.enemies.length < 3 && G.random() < dt * 0.5) spawnThugAt(G, step.x, step.y);
+    }
+    return false;
+  }
+  return false;
 }
 
-/** Advance the dialog line, or close it when the last line was shown. */
-export function advanceDialog(G) {
-  const d = G.missions.dialog;
-  if (!d) return;
-  d.line += 1;
-  G.missions.dialogT = 0;
-  if (d.line >= d.lines.length) G.missions.dialog = null;
-  else G.audio.click();
-}
-
-/** Complete the current mission: pay out, fanfare, and open the next briefing. */
-function completeMission(G) {
-  const M = G.missions;
-  const reward = MISSION_REWARDS[M.index] || 500;
-  G.player.money += reward;
-  M.completedCount += 1;
-  G.audio.missionComplete();
-  G.audio.cash();
-  G.toast = 'MISSION COMPLETE — ' + MISSIONS[M.index].title + '  +$' + reward;
+export function completeMission(G) {
+  const m = G.missions;
+  const idx = m.index;
+  const reward = MISSION_REWARDS[idx] || 500;
+  let bonus = 0;
+  if (G.wanted.stars === 0) bonus += 100;
+  const mission = MISSIONS[idx];
+  if (mission.timer && G.missionTimer.remaining > 30) bonus += 200;
+  G.player.money += reward + bonus;
+  m.completedCount += 1;
+  addRep(G, 150, 'mission');
+  if (G.weapons) G.weapons.checkUnlocks(G);
+  G.toast = 'MISSION COMPLETE — ' + mission.title + '  +$' + (reward + bonus);
   G.toastT = 4;
-  M.index += 1;
-  M.step = 0;
-  // Save AFTER advancing, so the save opens on the next mission, not the one just finished.
-  G.saveGame();
-  if (M.index >= MISSIONS.length) {
-    M.done = true;
+  if (G.audio) G.audio.fanfare();
+  if (G.dialogue) G.dialogue.contextLine(G, 'praise');
+  G.missionTimer.active = false;
+  m.index += 1;
+  m.step = 0;
+  if (m.index >= MISSIONS.length) {
+    m.done = true;
     G.gameWon = true;
     return;
   }
-  // New day banner when the day changes.
-  const prev = MISSIONS[M.index - 1];
-  const next = MISSIONS[M.index];
-  if (next.day !== prev.day) {
-    G.dayBanner = 'DAY ' + next.day + ' — ' + (next.day === 2 ? 'The Heat Rises' : 'The Last Score');
-    G.dayBannerT = 4;
-    G.clock.day = next.day;
-  }
-  prepareStep(G);
+  const next = MISSIONS[m.index];
+  G.clock.day = next.day;
   openBriefing(G);
+  prepareStep(G);
 }
 
-function advanceStep(G) {
-  const M = G.missions;
-  M.step += 1;
-  const m = currentMission(M);
-  if (!m) return;
-  if (M.step >= m.steps.length) {
-    completeMission(G);
-  } else {
-    prepareStep(G);
-  }
-}
-
-/** One mission step: check the current objective and advance it when done. */
 export function updateMissions(G, dt) {
-  const M = G.missions;
-  if (M.done) return;
-  // Dialog auto-advances after a few seconds so a staged screenshot still plays.
-  if (M.dialog) {
-    M.dialogT += dt;
-    if (M.dialogT > 5) advanceDialog(G);
-  }
-  const step = currentStep(M);
+  const m = G.missions;
+  if (m.done || !currentMission(G)) return;
+  m.missionT += dt;
+  const step = currentStep(G);
   if (!step) return;
-  const p = G.player;
-  const px = p.car ? p.car.x : p.x;
-  const py = p.car ? p.car.y : p.y;
-  if (step.type === 'goto' || step.type === 'drive') {
-    if (dist(px, py, step.x, step.y) < step.r) {
-      if (step.type === 'drive' && !p.car) return; // must arrive by car
-      advanceStep(G);
+  const mission = currentMission(G);
+  if (mission.timer && G.missionTimer.active) {
+    G.missionTimer.remaining -= dt;
+    if (G.missionTimer.remaining <= 0) {
+      G.missionTimer.remaining = 0;
+      G.missionTimer.active = false;
+      m.step = 0;
+      m.missionT = 0;
+      G.toast = 'Too late — the show started without Lena. Try again.';
+      G.toastT = 4;
+      prepareStep(G);
+      return;
     }
-  } else if (step.type === 'collect') {
-    for (const pk of M.pickups) {
-      if (!pk.taken && dist(px, py, pk.x, pk.y) < 56) {
-        pk.taken = true;
-        G.audio.pickup();
-        G.player.money += 25;
-      }
-    }
-    if (M.pickups.length > 0 && M.pickups.every((pk) => pk.taken)) advanceStep(G);
-  } else if (step.type === 'fight') {
-    if (M.killed >= step.count && G.enemies.length === 0) advanceStep(G);
-  } else if (step.type === 'escape') {
-    if (dist(px, py, step.x, step.y) < step.r && G.wanted.stars > 0) {
-      M.layLow += dt;
-      if (M.layLow > 5) {
-        // Lay low long enough: the heat dies and the step completes.
-        G.wanted.stars = 0;
-        G.wanted.heat = 0;
-        G.audio.setSiren(false);
-        advanceStep(G);
-      }
-    } else {
-      M.layLow = 0;
-    }
-  } else if (step.type === 'chase') {
-    const car = M.chaseCar;
-    if (car && car.wrecked) {
-      G.player.money += 100;
-      advanceStep(G);
-    } else if (car && dist(px, py, car.x, car.y) > 1400) {
-      // Lost him: respawn the courier nearer the player.
-      car.x = px + 500;
-      car.y = py + 200;
-    }
-  } else if (step.type === 'defend') {
-    M.timer += dt;
-    // Reinforcements trickle in while the defence holds.
-    if (M.timer > 15 && M.spawned < 6) {
-      spawnThugs(G, step.x, step.y, 3);
-    }
-    if (M.timer >= step.seconds && G.enemies.length === 0) advanceStep(G);
   }
-}
-
-/** The mission objective text for the HUD panel. */
-export function objectiveText(G) {
-  const m = currentMission(G.missions);
-  if (!m) return 'All missions complete — Porto Verde is yours.';
-  const step = currentStep(G.missions);
-  if (!step) return m.title;
-  let extra = '';
-  if (step.type === 'fight') extra = '  (' + Math.min(G.missions.killed, step.count) + '/' + step.count + ')';
-  if (step.type === 'collect') {
-    const got = G.missions.pickups.filter((pk) => pk.taken).length;
-    extra = '  (' + got + '/' + step.count + ')';
+  if (step.type === 'escape' && G.missionTimer.active) {
+    G.missionTimer.remaining += dt;
   }
-  if (step.type === 'defend') extra = '  (' + Math.floor(G.missions.timer) + 's / ' + step.seconds + 's)';
-  if (step.type === 'escape' && G.missions.layLow > 0) extra = '  (lay low… ' + Math.ceil(5 - G.missions.layLow) + 's)';
-  return step.label + extra;
+  if (stepDone(G, step, dt)) {
+    m.step += 1;
+    if (m.step >= mission.steps.length) completeMission(G);
+    else prepareStep(G);
+  }
 }
